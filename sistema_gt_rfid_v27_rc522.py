@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Sistema Completo de Controle de Acesso GBMX
+Atualizado em 11/08/2026
 Integração com Leitor RFID, Planilha Excel, Controle de Equipamento e Checklist com Email e PDF
 """
 
