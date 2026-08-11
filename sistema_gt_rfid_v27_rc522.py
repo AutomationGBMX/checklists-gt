@@ -204,9 +204,11 @@ class GerenciadorGitHub:
                 print(f"[GIT] Erro no clone: {resultado_clone.stderr}")
                 return False
             
-            # Copiar PDF para o repo
-            destino = os.path.join(repo_abs, nome_arquivo)
-            print(f"[GIT] Copiando {nome_arquivo}...")
+            # Copiar PDF para a pasta checklists/ dentro do repo
+            pasta_checklists_repo = os.path.join(repo_abs, 'checklists')
+            os.makedirs(pasta_checklists_repo, exist_ok=True)
+            destino = os.path.join(pasta_checklists_repo, nome_arquivo)
+            print(f"[GIT] Copiando {nome_arquivo} para checklists/...")
             with open(arquivo_abs, 'rb') as f:
                 conteudo = f.read()
             with open(destino, 'wb') as f:
