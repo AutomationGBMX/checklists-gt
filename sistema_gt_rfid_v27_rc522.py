@@ -456,7 +456,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         titulo.setStyleSheet("color: #333; margin-bottom: 10px;")
         
         self.lbl_status_chk = QtWidgets.QLabel("Aproxime seu crachá para preencher seus dados.")
-        self.lbl_status_chk.setStyleSheet("color: #E65100; font-weight: bold; padding: 8px; font-size: 14px;")
+        self.lbl_status_chk.setStyleSheet("color: #E65100; font-weight: bold; padding: 8px; font-size: 22px;")
         self.lbl_status_chk.setAlignment(Qt.AlignCenter)
         
         # Formulário com labels e campos lado a lado
