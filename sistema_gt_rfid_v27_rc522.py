@@ -41,7 +41,7 @@ try:
     GPIO.setup(24, GPIO.OUT, initial=GPIO.LOW)  # Relé Liberar GT
     HAS_GPIO = True
 except Exception as e:
-    print(f"[AVISO] RPi.GPIO não inicializado (Execução fora da Raspberry Pi): {e}")
+    print(f"[AVISO] RPi.GPIO não inicializado: {e}")
     HAS_GPIO = False
 
 
@@ -58,7 +58,7 @@ def set_gpios(estado: int):
 
 
 # ============================================================================
-# EMISSOR DE SINAIS E THREAD RFID (RC522)
+# EMISSOR DE SINAIS E THREAD RFID ROBUSTA (RC522)
 # ============================================================================
 class RFIDSignals(QObject):
     uid_recebido = pyqtSignal(str)
@@ -72,38 +72,41 @@ class LeituraRC522(threading.Thread):
         self.daemon = True
 
     def run(self):
-        try:
-            from mfrc522 import SimpleMFRC522
-            reader = SimpleMFRC522()
-            print("✓ Leitor RC522 inicializado com sucesso!")
+        reader = None
+        erros_consecutivos = 0
 
-            while self.ativo:
-                try:
-                    id_card = reader.read_id()
-                    if id_card:
-                        try:
-                            num_bytes = (id_card.bit_length() + 7) // 8
-                            if num_bytes < 4:
-                                num_bytes = 4
-                            uid_bytes = id_card.to_bytes(num_bytes, byteorder='big')
-                            uid_le = int.from_bytes(uid_bytes[:4], byteorder='little')
-                            uid = str(uid_le)
-                        except Exception:
-                            uid = str(id_card)
-                        print(f"[RFID] UID Lido: {uid}")
-                        self.signals.uid_recebido.emit(uid)
-                        time.sleep(0.8)
-                except Exception:
-                    time.sleep(0.2)
-        except Exception as e:
-            print(f"✗ Erro no módulo RC522: {e}")
+        while self.ativo:
+            try:
+                if reader is None:
+                    from mfrc522 import SimpleMFRC522
+                    reader = SimpleMFRC522()
+                    print("✓ Leitor RC522 inicializado/reiniciado com sucesso!")
+
+                id_card, _ = reader.read_no_block()
+
+                if id_card:
+                    uid = str(id_card).strip()
+                    print(f"[RFID] UID Lido: {uid}")
+                    self.signals.uid_recebido.emit(uid)
+                    erros_consecutivos = 0
+                    time.sleep(0.8)
+                else:
+                    time.sleep(0.1)
+
+            except Exception as e:
+                erros_consecutivos += 1
+                if erros_consecutivos >= 3:
+                    print(f"[RFID] Falha de comunicação no SPI ({e}). Reiniciando leitor...")
+                    reader = None
+                    erros_consecutivos = 0
+                time.sleep(0.2)
 
     def parar(self):
         self.ativo = False
 
 
 # ============================================================================
-# GERENCIAMENTO DE DADOS (EXCEL)
+# GERENCIAMENTO DE DADOS (EXCEL ROBUSTO COM LEITURA STRING)
 # ============================================================================
 class GerenciadorDados:
     def __init__(self, arquivo_excel='Lista_Basedecrachás.xlsx'):
@@ -114,13 +117,33 @@ class GerenciadorDados:
     def carregar_planilha(self):
         try:
             if os.path.exists(self.arquivo):
-                self.df = pd.read_excel(self.arquivo)
+                # Importa forçando tudo como STRING para não estragar os UIDs dos crachás
+                self.df = pd.read_excel(self.arquivo, dtype=str)
+
+                # Normaliza nomes de colunas
+                mapeamento = {}
+                for col in self.df.columns:
+                    col_norm = str(col).strip().upper()
+                    if col_norm in ['CRACHA', 'CRACHÁ', 'CARD', 'UID']:
+                        mapeamento[col] = 'CRACHÁ'
+                    elif col_norm in ['NOME', 'OPERADOR', 'FUNCIONARIO']:
+                        mapeamento[col] = 'NOME'
+                    elif col_norm in ['MATRICULA', 'MATRÍCULA', 'ID']:
+                        mapeamento[col] = 'MATRICULA'
+                    elif col_norm in ['STATUS', 'SITUACAO', 'SITUAÇÃO']:
+                        mapeamento[col] = 'STATUS'
+
+                self.df.rename(columns=mapeamento, inplace=True)
+
                 if 'STATUS' not in self.df.columns:
                     self.df['STATUS'] = 'D'
                     self.salvar_planilha()
-                print(f"✓ Base de dados carregada: {len(self.df)} registros")
+
+                print(f"✓ Base de dados carregada ({len(self.df)} registros)")
                 return True
-            return False
+            else:
+                print(f"✗ Arquivo '{self.arquivo}' não foi encontrado no diretório!")
+                return False
         except Exception as e:
             print(f"✗ Erro ao carregar planilha: {e}")
             return False
@@ -130,37 +153,62 @@ class GerenciadorDados:
             if self.df is not None:
                 self.df.to_excel(self.arquivo, index=False)
                 return True
-        except Exception:
+        except Exception as e:
+            print(f"[ERRO SALVAR] {e}")
             return False
 
-    def buscar_por_cracha(self, uid):
-        if self.df is None: return None
+    def _normalizar_val(self, valor):
+        if pd.isnull(valor):
+            return ""
+        v_str = str(valor).strip()
+        if v_str.endswith('.0'):
+            v_str = v_str[:-2]
+        # Tenta extrair apenas dígitos numéricos para comparação limpa
         try:
-            uid_int = int(uid)
-            resultado = self.df[self.df['CRACHÁ'] == uid_int]
-            if not resultado.empty:
-                linha = resultado.iloc[0]
-                return {
-                    'nome': str(linha['NOME']),
-                    'matricula': str(int(linha['MATRICULA'])),
-                    'cracha': str(int(linha['CRACHÁ'])),
-                    'status': str(linha.get('STATUS', 'D'))
-                }
+            return str(int(v_str))
+        except ValueError:
+            return v_str.upper()
+
+    def buscar_por_cracha(self, uid):
+        if self.df is None or 'CRACHÁ' not in self.df.columns:
+            print("[BUSCA] Planilha não carregada ou coluna 'CRACHÁ' inexistente.")
             return None
-        except Exception:
+        try:
+            uid_alvo = self._normalizar_val(uid)
+            print(f"[BUSCA PLANILHA] Comparando UID recebido '{uid}' (norm: '{uid_alvo}')")
+
+            for _, linha in self.df.iterrows():
+                cracha_planilha = self._normalizar_val(linha['CRACHÁ'])
+                if cracha_planilha == uid_alvo:
+                    nome = str(linha.get('NOME', 'Desconhecido')).strip()
+                    matricula = self._normalizar_val(linha.get('MATRICULA', '0'))
+                    status = str(linha.get('STATUS', 'D')).strip().upper()
+                    print(f"✓ [ENCONTRADO] Usuário: {nome} | Status: {status}")
+                    return {
+                        'nome': nome,
+                        'matricula': matricula,
+                        'cracha': cracha_planilha,
+                        'status': status
+                    }
+
+            print(f"✗ [NÃO ENCONTRADO] Nenhum registro compatível com UID '{uid_alvo}'")
+            return None
+        except Exception as e:
+            print(f"[ERRO BUSCA] {e}")
             return None
 
     def alterar_status(self, uid, novo_status):
-        if self.df is None: return False
-        try:
-            uid_int = int(uid)
-            idx = self.df.index[self.df['CRACHÁ'] == uid_int].tolist()
-            if idx:
-                self.df.at[idx[0], 'STATUS'] = novo_status
-                self.salvar_planilha()
-                return True
+        if self.df is None or 'CRACHÁ' not in self.df.columns:
             return False
-        except Exception:
+        try:
+            uid_alvo = self._normalizar_val(uid)
+            for idx, linha in self.df.iterrows():
+                if self._normalizar_val(linha['CRACHÁ']) == uid_alvo:
+                    self.df.at[idx, 'STATUS'] = novo_status
+                    return self.salvar_planilha()
+            return False
+        except Exception as e:
+            print(f"[ERRO ALTERAR STATUS] {e}")
             return False
 
 
@@ -233,32 +281,27 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.dados = GerenciadorDados()
         self.git = GerenciadorGitHub()
 
-        # Lista de Rótulos de Cabeçalho (Data, Hora e Turno)
         self.labels_data_hora = []
-
-        # Gerenciamento de Turnos e Checklists Aprovados
         self.checklists_aprovados_turno = {}
 
-        # Dados da Sessão Atual
         self.operador_atual = None
         self.respostas_checklist = {}
 
-        # Thread RFID
+        self.ultimo_uid_lido = None
+        self.tempo_ultimo_lido = 0
+
         self.serial = LeituraRC522()
         self.serial.signals.uid_recebido.connect(self.processar_rfid)
         self.serial.start()
 
-        # Timer para Liberação Temporizada (3 minutos)
         self.timer_liberacao = QTimer(self)
         self.timer_liberacao.setSingleShot(True)
         self.timer_liberacao.timeout.connect(self.finalizar_tempo_liberacao)
 
-        # Timer de Relógio Digital
         self.timer_relogio = QTimer(self)
         self.timer_relogio.timeout.connect(self.atualizar_relogio)
         self.timer_relogio.start(1000)
 
-        # Perguntas Fixas
         self.perguntas = [
             "O leitor de crachá encontra-se em pleno funcionamento?",
             "Os botões de acionamento, emergência e os controles do painel encontram-se em perfeito funcionamento?",
@@ -302,13 +345,12 @@ class SistemaGT(QtWidgets.QMainWindow):
     def invalidar_checklists_do_turno(self):
         turno_atual = self.obter_turno_atual()
         self.checklists_aprovados_turno[turno_atual] = set()
-        print(f"[SISTEMA] Checklists do turno {turno_atual} foram invalidados.")
 
     def criar_widget_cabecalho(self):
         lbl = QtWidgets.QLabel()
-        lbl.setFont(QFont("Arial", 13, QFont.Bold))
+        lbl.setFont(QFont("Arial", 12, QFont.Bold))
         lbl.setAlignment(Qt.AlignCenter)
-        lbl.setStyleSheet("color: #1A237E; background-color: #E8EAF6; padding: 5px 14px; border-radius: 6px;")
+        lbl.setStyleSheet("color: #1A237E; background-color: #E8EAF6; padding: 4px 12px; border-radius: 6px;")
         self.labels_data_hora.append(lbl)
         return lbl
 
@@ -327,7 +369,6 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.central_widget = QtWidgets.QStackedWidget()
         self.setCentralWidget(self.central_widget)
 
-        # Construção das Telas
         self.tela_liberar_gt = self.criar_tela_menu_liberar_gt()
         self.tela_leitura = self.criar_tela_leitura()
 
@@ -343,7 +384,6 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.tela_aprovado = self.criar_tela_aprovado()
         self.tela_reprovado_bloqueado = self.criar_tela_reprovado_bloqueado()
 
-        # Adicionar Telas ao Stacked Widget
         self.central_widget.addWidget(self.tela_liberar_gt)
         self.central_widget.addWidget(self.tela_leitura)
         for t in self.telas_checklist_perguntas:
@@ -356,10 +396,11 @@ class SistemaGT(QtWidgets.QMainWindow):
 
     def mudar_tela(self, tela, novo_estado):
         self.estado_atual = novo_estado
+        self.ultimo_uid_lido = None
         self.central_widget.setCurrentWidget(tela)
 
     # ========================================================================
-    # TELA INICIAL: MENU - LIBERAR GT
+    # TELA INICIAL
     # ========================================================================
     def criar_tela_menu_liberar_gt(self):
         tela = QtWidgets.QWidget()
@@ -422,7 +463,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.lbl_instrucao.setStyleSheet("color: #333; margin-top: 10px; margin-bottom: 15px;")
 
         self.lbl_status = QtWidgets.QLabel("Aguardando leitura do leitor RFID...")
-        self.lbl_status.setFont(QFont("Arial", 13))
+        self.lbl_status.setFont(QFont("Arial", 14, QFont.Bold))
         self.lbl_status.setAlignment(Qt.AlignCenter)
         self.lbl_status.setStyleSheet(
             "color: #555; padding: 20px; border: 2px dashed #BDBDBD; border-radius: 10px; background-color: #FFFFFF;")
@@ -453,38 +494,41 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.lbl_status.setText(texto)
         self.lbl_status.setStyleSheet(
             f"color: {cor_texto}; padding: 15px; border: 2px solid {cor_fundo}; border-radius: 10px; background-color: {cor_fundo}; font-weight: bold;")
-        QTimer.singleShot(2500, lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
+        QTimer.singleShot(3000, lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
 
     # ========================================================================
-    # CONSTRUTOR DE TELAS DE CHECKLIST (FONTE AUMENTADA)
+    # CHECKLIST COM FONTES AUMENTADAS
     # ========================================================================
     def criar_bloco_pergunta(self, idx_pergunta):
         container = QtWidgets.QGroupBox(f"Item {idx_pergunta + 1}")
         container.setStyleSheet(
-            "QGroupBox { font-size: 13px; font-weight: bold; color: #1565C0; border: 1px solid #BBDEFB; border-radius: 6px; margin-top: 4px; background-color: #FFFFFF; }")
+            "QGroupBox { font-size: 15px; font-weight: bold; color: #1565C0; "
+            "border: 2px solid #BBDEFB; border-radius: 6px; margin-top: 2px; background-color: #FFFFFF; }"
+        )
 
         layout = QtWidgets.QVBoxLayout()
-        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setContentsMargins(10, 4, 10, 6)
         layout.setSpacing(6)
 
-        # FONTE DAS PERGUNTAS AUMENTADA PARA 14pt BOLD
+        # AUMENTADO: Texto da pergunta agora em 16pt
         lbl_p = QtWidgets.QLabel(self.perguntas[idx_pergunta])
-        lbl_p.setFont(QFont("Arial", 14, QFont.Bold))
+        lbl_p.setFont(QFont("Arial", 16, QFont.Bold))
         lbl_p.setWordWrap(True)
-        lbl_p.setStyleSheet("color: #212121;")
+        lbl_p.setStyleSheet("color: #111111;")
 
         h_btn = QtWidgets.QHBoxLayout()
         h_btn.setSpacing(15)
 
+        # AUMENTADO: Botões agora com texto 15pt e altura maior
         btn_ok = QtWidgets.QPushButton("OK")
-        btn_ok.setFont(QFont("Arial", 13, QFont.Bold))
-        btn_ok.setFixedHeight(42)
+        btn_ok.setFont(QFont("Arial", 15, QFont.Bold))
+        btn_ok.setFixedHeight(48)
         btn_ok.setStyleSheet(
             "background-color: #E8F5E9; color: #2E7D32; border: 2px solid #2E7D32; border-radius: 6px;")
 
         btn_nok = QtWidgets.QPushButton("NÃO OK")
-        btn_nok.setFont(QFont("Arial", 13, QFont.Bold))
-        btn_nok.setFixedHeight(42)
+        btn_nok.setFont(QFont("Arial", 15, QFont.Bold))
+        btn_nok.setFixedHeight(48)
         btn_nok.setStyleSheet(
             "background-color: #FFEBEE; color: #C62828; border: 2px solid #C62828; border-radius: 6px;")
 
@@ -515,13 +559,13 @@ class SistemaGT(QtWidgets.QMainWindow):
     def criar_tela_par_perguntas(self, idx1, idx2):
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout()
-        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setContentsMargins(10, 4, 10, 4)
         layout.setSpacing(4)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
-        header = QtWidgets.QLabel("CHECKLIST DE SEGURANÇA - GUINCHO TRACIONADOR")
-        header.setFont(QFont("Arial", 12, QFont.Bold))
+        header = QtWidgets.QLabel("CHECKLIST DE SEGURANÇA")
+        header.setFont(QFont("Arial", 13, QFont.Bold))
         header.setAlignment(Qt.AlignCenter)
         header.setStyleSheet("color: #1A237E;")
 
@@ -531,7 +575,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         botoes_nav = QtWidgets.QHBoxLayout()
 
         btn_voltar = QtWidgets.QPushButton("◄ ANTERIOR")
-        btn_voltar.setFont(QFont("Arial", 12, QFont.Bold))
+        btn_voltar.setFont(QFont("Arial", 13, QFont.Bold))
         btn_voltar.setFixedHeight(45)
         btn_voltar.setStyleSheet("background-color: #757575; color: white; border-radius: 6px;")
 
@@ -543,7 +587,7 @@ class SistemaGT(QtWidgets.QMainWindow):
                                                                f"CHK_PAG_{idx_tela_atual - 1}"))
 
         btn_proximo = QtWidgets.QPushButton("PRÓXIMO ►")
-        btn_proximo.setFont(QFont("Arial", 12, QFont.Bold))
+        btn_proximo.setFont(QFont("Arial", 13, QFont.Bold))
         btn_proximo.setFixedHeight(45)
         btn_proximo.setStyleSheet("background-color: #1565C0; color: white; border-radius: 6px;")
         btn_proximo.clicked.connect(lambda: self.validar_e_avancar_pagina(idx_tela_atual))
@@ -563,13 +607,13 @@ class SistemaGT(QtWidgets.QMainWindow):
     def criar_tela_pergunta_final(self, idx_pergunta):
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout()
-        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setContentsMargins(10, 4, 10, 4)
         layout.setSpacing(6)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
         header = QtWidgets.QLabel("CHECKLIST DE SEGURANÇA - FINALIZAÇÃO")
-        header.setFont(QFont("Arial", 12, QFont.Bold))
+        header.setFont(QFont("Arial", 13, QFont.Bold))
         header.setAlignment(Qt.AlignCenter)
         header.setStyleSheet("color: #1A237E;")
 
@@ -577,13 +621,13 @@ class SistemaGT(QtWidgets.QMainWindow):
 
         botoes_nav = QtWidgets.QHBoxLayout()
         btn_voltar = QtWidgets.QPushButton("◄ ANTERIOR")
-        btn_voltar.setFont(QFont("Arial", 12, QFont.Bold))
+        btn_voltar.setFont(QFont("Arial", 13, QFont.Bold))
         btn_voltar.setFixedHeight(45)
         btn_voltar.setStyleSheet("background-color: #757575; color: white; border-radius: 6px;")
         btn_voltar.clicked.connect(lambda: self.mudar_tela(self.telas_checklist_perguntas[4], "CHK_PAG_4"))
 
         btn_concluir = QtWidgets.QPushButton("CONCLUIR CHECKLIST")
-        btn_concluir.setFont(QFont("Arial", 12, QFont.Bold))
+        btn_concluir.setFont(QFont("Arial", 13, QFont.Bold))
         btn_concluir.setFixedHeight(45)
         btn_concluir.setStyleSheet("background-color: #2E7D32; color: white; border-radius: 6px;")
         btn_concluir.clicked.connect(self.processar_finalizacao_checklist)
@@ -731,10 +775,19 @@ class SistemaGT(QtWidgets.QMainWindow):
     # PROCESSAMENTO DE LEITURA RFID
     # ========================================================================
     def processar_rfid(self, uid):
-        print(f"[PROCESSAR RFID] UID: {uid} | Estado: {self.estado_atual}")
+        agora = time.time()
+        uid_clean = str(uid).strip()
+
+        if uid_clean == self.ultimo_uid_lido and (agora - self.tempo_ultimo_lido) < 1.0:
+            return
+
+        self.ultimo_uid_lido = uid_clean
+        self.tempo_ultimo_lido = agora
+
+        print(f"[PROCESSAR RFID] UID Lido: {uid_clean} | Estado: {self.estado_atual}")
 
         if self.estado_atual == "SISTEMA_BLOQUEADO":
-            if uid == UID_MESTRE:
+            if uid_clean == UID_MESTRE:
                 print("✓ Sistema desbloqueado com Crachá Mestre!")
                 self.mudar_tela(self.tela_liberar_gt, "MENU_GT")
             return
@@ -743,7 +796,7 @@ class SistemaGT(QtWidgets.QMainWindow):
             return
 
         if self.estado_atual == "LIBERAR_EQUIPAMENTO":
-            func = self.dados.buscar_por_cracha(uid)
+            func = self.dados.buscar_por_cracha(uid_clean)
             if not func:
                 self.mostrar_mensagem("ACESSO NEGADO\n\nCrachá não cadastrado!", "#C62828", "white")
                 return
@@ -761,42 +814,52 @@ class SistemaGT(QtWidgets.QMainWindow):
                 self.iniciar_checklist_para_usuario(func)
 
         elif self.estado_atual == "HABILITAR_USUARIO_MESTRE":
-            if uid == UID_MESTRE:
+            if uid_clean == UID_MESTRE:
                 self.estado_atual = "HABILITAR_USUARIO_FINAL"
+                self.ultimo_uid_lido = None
                 self.lbl_instrucao.setText("Aproxime o crachá do USUÁRIO")
-                self.lbl_status.setText("Mestre Autorizado!\nAguardando crachá do Usuário...")
+                self.lbl_status.setText("✓ Mestre Autorizado!\n\nAproxime o crachá do Usuário...")
                 self.lbl_status.setStyleSheet(
-                    "color: #2E7D32; padding: 15px; border: 2px solid #2E7D32; border-radius: 10px; font-weight: bold;")
+                    "color: #1B5E20; padding: 15px; border: 2px solid #2E7D32; border-radius: 10px; font-weight: bold; background-color: #E8F5E9;")
             else:
                 self.mostrar_mensagem("ERRO\n\nCrachá não é Mestre!", "#C62828", "white")
 
         elif self.estado_atual == "HABILITAR_USUARIO_FINAL":
-            func = self.dados.buscar_por_cracha(uid)
+            if uid_clean == UID_MESTRE:
+                print("[RFID] Crachá Mestre detectado novamente. Aguardando crachá do Usuário...")
+                return
+
+            func = self.dados.buscar_por_cracha(uid_clean)
             if func:
-                if self.dados.alterar_status(uid, 'H'):
+                if self.dados.alterar_status(uid_clean, 'H'):
                     self.mostrar_mensagem(f"SUCESSO\n\nUsuário HABILITADO!\n{func['nome']}", "#2E7D32", "white")
                 else:
-                    self.mostrar_mensagem("ERRO\n\nFalha ao atualizar base!", "#C62828", "white")
+                    self.mostrar_mensagem("ERRO\n\nFalha ao atualizar planilha!", "#C62828", "white")
             else:
                 self.mostrar_mensagem("ERRO\n\nCrachá não encontrado!", "#C62828", "white")
 
         elif self.estado_atual == "DESABILITAR_USUARIO_MESTRE":
-            if uid == UID_MESTRE:
+            if uid_clean == UID_MESTRE:
                 self.estado_atual = "DESABILITAR_USUARIO_FINAL"
+                self.ultimo_uid_lido = None
                 self.lbl_instrucao.setText("Aproxime o crachá do USUÁRIO")
-                self.lbl_status.setText("Mestre Autorizado!\nAguardando crachá do Usuário...")
+                self.lbl_status.setText("✓ Mestre Autorizado!\n\nAproxime o crachá do Usuário...")
                 self.lbl_status.setStyleSheet(
-                    "color: #2E7D32; padding: 15px; border: 2px solid #2E7D32; border-radius: 10px; font-weight: bold;")
+                    "color: #1B5E20; padding: 15px; border: 2px solid #2E7D32; border-radius: 10px; font-weight: bold; background-color: #E8F5E9;")
             else:
                 self.mostrar_mensagem("ERRO\n\nCrachá não é Mestre!", "#C62828", "white")
 
         elif self.estado_atual == "DESABILITAR_USUARIO_FINAL":
-            func = self.dados.buscar_por_cracha(uid)
+            if uid_clean == UID_MESTRE:
+                print("[RFID] Crachá Mestre detectado novamente. Aguardando crachá do Usuário...")
+                return
+
+            func = self.dados.buscar_por_cracha(uid_clean)
             if func:
-                if self.dados.alterar_status(uid, 'D'):
+                if self.dados.alterar_status(uid_clean, 'D'):
                     self.mostrar_mensagem(f"SUCESSO\n\nUsuário DESABILITADO!\n{func['nome']}", "#EF6C00", "white")
                 else:
-                    self.mostrar_mensagem("ERRO\n\nFalha ao atualizar base!", "#C62828", "white")
+                    self.mostrar_mensagem("ERRO\n\nFalha ao atualizar planilha!", "#C62828", "white")
             else:
                 self.mostrar_mensagem("ERRO\n\nCrachá não encontrado!", "#C62828", "white")
 
