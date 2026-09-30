@@ -73,6 +73,32 @@ class LeituraRC522(threading.Thread):
         self.ativo = True
         self.daemon = True
 
+    @staticmethod
+    def converter_uid_rc522(id_card):
+        """Converte o ID bruto do RC522 para o UID usado na planilha.
+
+        Nesta leitura, o valor chega empacotado em cinco bytes. Os quatro
+        primeiros bytes representam o UID em ordem invertida e o último byte
+        não faz parte do número usado pela base de crachás.
+        Exemplo: 804690904180 (BB 5B 50 C4 74) -> 3293600699.
+        """
+        try:
+            valor = int(id_card)
+            if valor <= 0:
+                return ""
+
+            # IDs acima de 32 bits correspondem ao formato bruto observado
+            # no RC522: UID de quatro bytes + byte adicional.
+            if valor > 0xFFFFFFFF:
+                num_bytes = (valor.bit_length() + 7) // 8
+                uid_bytes = valor.to_bytes(num_bytes, byteorder="big")
+                return str(int.from_bytes(uid_bytes[:4], byteorder="little"))
+
+            # Se o driver já devolver um UID normalizado de 32 bits, preservá-lo.
+            return str(valor)
+        except (TypeError, ValueError, OverflowError):
+            return str(id_card).strip()
+
     def run(self):
         reader = None
         erros_consecutivos = 0
@@ -87,8 +113,8 @@ class LeituraRC522(threading.Thread):
                 id_card, _ = reader.read_no_block()
 
                 if id_card:
-                    uid = str(id_card).strip()
-                    print(f"[RFID] UID Lido: {uid}")
+                    uid = self.converter_uid_rc522(id_card)
+                    print(f"[RFID] UID bruto: {id_card} | UID normalizado: {uid}")
                     self.signals.uid_recebido.emit(uid)
                     erros_consecutivos = 0
                     time.sleep(0.8)
