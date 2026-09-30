@@ -1,0 +1,21 @@
+pgrep -af 'python|\.py'
+
+
+1234 python3 /home/pi/outro_projeto.py
+
+
+kill 1234
+
+kill -9 1234
+
+grep -RInE 'Exec=.*(python|\.py|checklist|rfid|guincho|sistema)|^@.*(python|\.py|checklist|rfid|guincho|sistema)' \
+"$HOME/.config/autostart" \
+"$HOME/.config/lxsession" \
+/etc/xdg/autostart \
+/etc/xdg/lxsession 2>/dev/null
+
+
+
+systemctl --user --type=service --state=running --no-pager | grep -Ei 'python|check|rfid|guincho|sistema'
+systemctl --type=service --state=running --no-pager | grep -Ei 'python|check|rfid|guincho|sistema'
+
