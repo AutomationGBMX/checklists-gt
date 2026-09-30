@@ -10,6 +10,7 @@ import os
 import threading
 import time
 import subprocess
+import shutil
 import pandas as pd
 from datetime import datetime, timedelta
 
@@ -18,7 +19,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib import colors
-from PyQt5 import QtWidgets, QtCore, QtGui
+from PyQt5 import QtWidgets
 from PyQt5.QtGui import QFont
 from PyQt5.QtCore import pyqtSignal, QObject, Qt, QTimer
 
@@ -27,9 +28,10 @@ from PyQt5.QtCore import pyqtSignal, QObject, Qt, QTimer
 # ============================================================================
 UID_MESTRE = "3293600699"
 
-REPO_URL = "https://AutomationGBMX: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@github.com/AutomationGBMX/checklists-gt.git"
-REPO_LOCAL = "./checklists-repo"
-PASTA_CHECKLISTS = "./checklists"
+REPO_URL = os.environ.get("GITHUB_REPO_URL", "https://github.com/AutomationGBMX/checklists-gt.git")
+REPO_LOCAL = os.path.abspath("./checklists-repo")
+PASTA_CHECKLISTS = os.path.abspath("./checklists")
+TEMPO_LIBERACAO_SEGUNDOS = 180
 
 # Inicialização de Hardware GPIO
 try:
@@ -71,6 +73,32 @@ class LeituraRC522(threading.Thread):
         self.ativo = True
         self.daemon = True
 
+    @staticmethod
+    def converter_uid_rc522(id_card):
+        """Converte o ID bruto do RC522 para o UID usado na planilha.
+
+        Nesta leitura, o valor chega empacotado em cinco bytes. Os quatro
+        primeiros bytes representam o UID em ordem invertida e o último byte
+        não faz parte do número usado pela base de crachás.
+        Exemplo: 804690904180 (BB 5B 50 C4 74) -> 3293600699.
+        """
+        try:
+            valor = int(id_card)
+            if valor <= 0:
+                return ""
+
+            # IDs acima de 32 bits correspondem ao formato bruto observado
+            # no RC522: UID de quatro bytes + byte adicional.
+            if valor > 0xFFFFFFFF:
+                num_bytes = (valor.bit_length() + 7) // 8
+                uid_bytes = valor.to_bytes(num_bytes, byteorder="big")
+                return str(int.from_bytes(uid_bytes[:4], byteorder="little"))
+
+            # Se o driver já devolver um UID normalizado de 32 bits, preservá-lo.
+            return str(valor)
+        except (TypeError, ValueError, OverflowError):
+            return str(id_card).strip()
+
     def run(self):
         reader = None
         erros_consecutivos = 0
@@ -85,8 +113,8 @@ class LeituraRC522(threading.Thread):
                 id_card, _ = reader.read_no_block()
 
                 if id_card:
-                    uid = str(id_card).strip()
-                    print(f"[RFID] UID Lido: {uid}")
+                    uid = self.converter_uid_rc522(id_card)
+                    print(f"[RFID] UID bruto: {id_card} | UID normalizado: {uid}")
                     self.signals.uid_recebido.emit(uid)
                     erros_consecutivos = 0
                     time.sleep(0.8)
@@ -216,56 +244,126 @@ class GerenciadorDados:
 # GERENCIADOR GITHUB
 # ============================================================================
 class GerenciadorGitHub:
+    """Mantém uma única cópia local do repositório e publica os PDFs nela."""
+
     def __init__(self):
         self.repo_url = REPO_URL
+        self.repo_abs = os.path.abspath(REPO_LOCAL)
         self.inicializar_repo()
 
+    def _git(self, argumentos, timeout=60):
+        return subprocess.run(
+            ["git", "-C", self.repo_abs, *argumentos],
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+
     def inicializar_repo(self):
+        """Reutiliza o repositório existente ou clona uma única vez se necessário."""
         try:
-            if not os.path.exists(REPO_LOCAL):
-                subprocess.run(f"git clone {REPO_URL} {REPO_LOCAL}", shell=True, capture_output=True, timeout=60)
+            caminho_git = os.path.join(self.repo_abs, '.git')
+            if os.path.exists(caminho_git):
+                print(f"[GIT] Repositório existente reutilizado: {self.repo_abs}")
+                return True
+
+            if os.path.exists(self.repo_abs):
+                if os.listdir(self.repo_abs):
+                    print(f"[GIT] Erro: {self.repo_abs} existe, mas não é um repositório Git.")
+                    return False
+                os.rmdir(self.repo_abs)
+
+            print(f"[GIT] Clonando repositório uma única vez em {self.repo_abs}...")
+            resultado = subprocess.run(
+                ["git", "clone", self.repo_url, self.repo_abs],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            if resultado.returncode == 0:
+                print("[GIT] Repositório clonado com sucesso")
+                return True
+
+            print(f"[GIT] Erro ao clonar: {resultado.stderr.strip()}")
+            return False
         except Exception as e:
-            print(f"[GIT] Erro ao inicializar repo: {e}")
+            print(f"[GIT] Erro ao inicializar repositório: {e}")
+            return False
+
+    def _obter_branch_atual(self):
+        resultado = self._git(["branch", "--show-current"], timeout=10)
+        branch = resultado.stdout.strip()
+        if branch:
+            return branch
+
+        resultado = self._git(["rev-parse", "--abbrev-ref", "HEAD"], timeout=10)
+        branch = resultado.stdout.strip()
+        return branch if branch and branch != "HEAD" else "main"
+
+    def _sincronizar_repo(self):
+        """Atualiza a cópia existente antes de adicionar um novo checklist."""
+        if not self.inicializar_repo():
+            return False
+
+        fetch = self._git(["fetch", "origin"], timeout=60)
+        if fetch.returncode != 0:
+            print(f"[GIT] Falha ao sincronizar (fetch): {fetch.stderr.strip()}")
+            return False
+
+        branch = self._obter_branch_atual()
+        pull = self._git(["pull", "--rebase", "--autostash", "origin", branch], timeout=60)
+        if pull.returncode != 0:
+            print(f"[GIT] Falha ao sincronizar (pull): {pull.stderr.strip()}")
+            return False
+        return True
 
     def fazer_upload_pdf(self, arquivo_pdf):
         try:
-            if not os.path.exists(arquivo_pdf): return False
-            arquivo_abs = os.path.abspath(arquivo_pdf)
-            nome_arquivo = os.path.basename(arquivo_pdf)
-            repo_abs = os.path.abspath(REPO_LOCAL)
+            if not os.path.exists(arquivo_pdf):
+                print(f"[GIT] PDF não encontrado: {arquivo_pdf}")
+                return False
 
-            import shutil
-            if os.path.exists(repo_abs):
-                shutil.rmtree(repo_abs)
+            if not self._sincronizar_repo():
+                return False
 
-            res_clone = subprocess.run(f"git clone {self.repo_url} {repo_abs}", shell=True, capture_output=True,
-                                       timeout=60)
-            if res_clone.returncode != 0: return False
-
-            pasta_repo = os.path.join(repo_abs, 'checklists')
+            pasta_repo = os.path.join(self.repo_abs, 'checklists')
             os.makedirs(pasta_repo, exist_ok=True)
+            nome_arquivo = os.path.basename(arquivo_pdf)
             destino = os.path.join(pasta_repo, nome_arquivo)
+            shutil.copy2(os.path.abspath(arquivo_pdf), destino)
 
-            with open(arquivo_abs, 'rb') as f_in, open(destino, 'wb') as f_out:
-                f_out.write(f_in.read())
+            caminho_relativo = os.path.relpath(destino, self.repo_abs)
+            add = self._git(["add", caminho_relativo], timeout=30)
+            if add.returncode != 0:
+                print(f"[GIT] Falha ao preparar PDF: {add.stderr.strip()}")
+                return False
 
-            subprocess.run(f'git -C {repo_abs} config user.email "checklist@gbmx.com"', shell=True, capture_output=True,
-                           timeout=10)
-            subprocess.run(f'git -C {repo_abs} config user.name "Sistema GBMX"', shell=True, capture_output=True,
-                           timeout=10)
-            subprocess.run(f"git -C {repo_abs} add .", shell=True, capture_output=True, timeout=30)
+            # Evita commits vazios quando o arquivo já está sincronizado.
+            staged = self._git(["diff", "--cached", "--quiet"], timeout=10)
+            if staged.returncode == 0:
+                print(f"[GIT] PDF já está sincronizado: {nome_arquivo}")
+                return True
+            if staged.returncode != 1:
+                print(f"[GIT] Não foi possível verificar alterações: {staged.stderr.strip()}")
+                return False
+
+            self._git(["config", "user.email", "checklist@gbmx.com"], timeout=10)
+            self._git(["config", "user.name", "Sistema GBMX"], timeout=10)
 
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            subprocess.run(f'git -C {repo_abs} commit -m "Checklist {timestamp}"', shell=True, capture_output=True,
-                           timeout=30)
+            commit = self._git(["commit", "-m", f"Checklist {timestamp}"], timeout=30)
+            if commit.returncode != 0:
+                print(f"[GIT] Falha no commit: {commit.stderr.strip()}")
+                return False
 
-            branch = subprocess.run(f"git -C {repo_abs} rev-parse --abbrev-ref HEAD", shell=True, capture_output=True,
-                                    text=True, timeout=10)
-            b_name = branch.stdout.strip() if branch.returncode == 0 else "main"
+            branch = self._obter_branch_atual()
+            push = self._git(["push", "origin", branch], timeout=60)
+            if push.returncode == 0:
+                print(f"[GIT] Upload realizado: {nome_arquivo}")
+                return True
 
-            res_push = subprocess.run(f"git -C {repo_abs} push origin {b_name}", shell=True, capture_output=True,
-                                      timeout=60)
-            return res_push.returncode == 0
+            print(f"[GIT] Falha no push: {push.stderr.strip()}")
+            return False
         except Exception as e:
             print(f"[GIT] Erro de upload: {e}")
             return False
@@ -289,14 +387,18 @@ class SistemaGT(QtWidgets.QMainWindow):
 
         self.ultimo_uid_lido = None
         self.tempo_ultimo_lido = 0
+        # Depois da autorização mestre, ignora leituras repetidas do mesmo
+        # cartão até que ele seja retirado e outro UID seja apresentado.
+        self.uid_bloqueado_ate_novo_cracha = None
 
-        self.serial = LeituraRC522()
-        self.serial.signals.uid_recebido.connect(self.processar_rfid)
-        self.serial.start()
+        self.leitor_rfid = LeituraRC522()
+        self.leitor_rfid.signals.uid_recebido.connect(self.processar_rfid)
+        self.leitor_rfid.start()
 
         self.timer_liberacao = QTimer(self)
         self.timer_liberacao.setSingleShot(True)
         self.timer_liberacao.timeout.connect(self.finalizar_tempo_liberacao)
+        self.fim_liberacao = None
 
         self.timer_relogio = QTimer(self)
         self.timer_relogio.timeout.connect(self.atualizar_relogio)
@@ -358,6 +460,23 @@ class SistemaGT(QtWidgets.QMainWindow):
         texto = f"{datetime.now().strftime('%d/%m/%Y - %H:%M:%S')}  |  {self.obter_texto_turno_atual()}"
         for lbl in self.labels_data_hora:
             lbl.setText(texto)
+        self.atualizar_cronometro_liberacao()
+
+    def atualizar_cronometro_liberacao(self):
+        """Exibe o tempo restante calculado a partir do prazo real de bloqueio."""
+        if self.fim_liberacao is None:
+            return
+
+        restante = self.fim_liberacao - time.monotonic()
+        if restante <= 0:
+            self.lbl_tempo_restante.setText("00:00:00")
+            self.finalizar_tempo_liberacao()
+            return
+
+        segundos = int(restante + 0.999999)
+        horas, resto = divmod(segundos, 3600)
+        minutos, segundos = divmod(resto, 60)
+        self.lbl_tempo_restante.setText(f"{horas:02d}:{minutos:02d}:{segundos:02d}")
 
     def configurar_interface(self):
         self.setWindowTitle("SISTEMA GBMX - LIBERAR GT")
@@ -383,6 +502,7 @@ class SistemaGT(QtWidgets.QMainWindow):
 
         self.tela_aprovado = self.criar_tela_aprovado()
         self.tela_reprovado_bloqueado = self.criar_tela_reprovado_bloqueado()
+        self.tela_confirmacao_operacao = self.criar_tela_confirmacao_operacao()
 
         self.central_widget.addWidget(self.tela_liberar_gt)
         self.central_widget.addWidget(self.tela_leitura)
@@ -390,6 +510,7 @@ class SistemaGT(QtWidgets.QMainWindow):
             self.central_widget.addWidget(t)
         self.central_widget.addWidget(self.tela_aprovado)
         self.central_widget.addWidget(self.tela_reprovado_bloqueado)
+        self.central_widget.addWidget(self.tela_confirmacao_operacao)
 
         self.central_widget.setCurrentWidget(self.tela_liberar_gt)
         self.estado_atual = "MENU_GT"
@@ -397,6 +518,7 @@ class SistemaGT(QtWidgets.QMainWindow):
     def mudar_tela(self, tela, novo_estado):
         self.estado_atual = novo_estado
         self.ultimo_uid_lido = None
+        self.uid_bloqueado_ate_novo_cracha = None
         self.central_widget.setCurrentWidget(tela)
 
     # ========================================================================
@@ -500,35 +622,35 @@ class SistemaGT(QtWidgets.QMainWindow):
     # CHECKLIST COM FONTES AUMENTADAS
     # ========================================================================
     def criar_bloco_pergunta(self, idx_pergunta):
-        container = QtWidgets.QGroupBox(f"Item {idx_pergunta + 1}")
-        container.setStyleSheet(
-            "QGroupBox { font-size: 15px; font-weight: bold; color: #1565C0; "
-            "border: 2px solid #BBDEFB; border-radius: 6px; margin-top: 2px; background-color: #FFFFFF; }"
-        )
+        """Cria uma pergunta sem caixa de fundo, integrada ao fundo da tela."""
+        container = QtWidgets.QWidget()
+        container.setAttribute(Qt.WA_TranslucentBackground)
+        container.setStyleSheet("background-color: transparent;")
+        container.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
 
-        layout = QtWidgets.QVBoxLayout()
-        layout.setContentsMargins(10, 4, 10, 6)
-        layout.setSpacing(6)
+        layout = QtWidgets.QVBoxLayout(container)
+        layout.setContentsMargins(8, 2, 8, 2)
+        layout.setSpacing(5)
 
-        # AUMENTADO: Texto da pergunta agora em 16pt
-        lbl_p = QtWidgets.QLabel(self.perguntas[idx_pergunta])
-        lbl_p.setFont(QFont("Arial", 16, QFont.Bold))
+        lbl_p = QtWidgets.QLabel(f"{idx_pergunta + 1}. {self.perguntas[idx_pergunta]}")
+        lbl_p.setFont(QFont("Arial", 14, QFont.Bold))
         lbl_p.setWordWrap(True)
-        lbl_p.setStyleSheet("color: #111111;")
+        lbl_p.setAlignment(Qt.AlignCenter)
+        lbl_p.setStyleSheet("background-color: transparent; color: #111111; padding: 0;")
 
         h_btn = QtWidgets.QHBoxLayout()
-        h_btn.setSpacing(15)
+        h_btn.setSpacing(12)
+        h_btn.setAlignment(Qt.AlignCenter)
 
-        # AUMENTADO: Botões agora com texto 15pt e altura maior
         btn_ok = QtWidgets.QPushButton("OK")
-        btn_ok.setFont(QFont("Arial", 15, QFont.Bold))
-        btn_ok.setFixedHeight(48)
+        btn_ok.setFont(QFont("Arial", 14, QFont.Bold))
+        btn_ok.setFixedSize(155, 42)
         btn_ok.setStyleSheet(
             "background-color: #E8F5E9; color: #2E7D32; border: 2px solid #2E7D32; border-radius: 6px;")
 
         btn_nok = QtWidgets.QPushButton("NÃO OK")
-        btn_nok.setFont(QFont("Arial", 15, QFont.Bold))
-        btn_nok.setFixedHeight(48)
+        btn_nok.setFont(QFont("Arial", 14, QFont.Bold))
+        btn_nok.setFixedSize(155, 42)
         btn_nok.setStyleSheet(
             "background-color: #FFEBEE; color: #C62828; border: 2px solid #C62828; border-radius: 6px;")
 
@@ -540,7 +662,6 @@ class SistemaGT(QtWidgets.QMainWindow):
 
         layout.addWidget(lbl_p)
         layout.addLayout(h_btn)
-        container.setLayout(layout)
         return container
 
     def selecionar_resposta(self, idx, valor, btn_ok, btn_nok):
@@ -558,25 +679,27 @@ class SistemaGT(QtWidgets.QMainWindow):
 
     def criar_tela_par_perguntas(self, idx1, idx2):
         tela = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout()
-        layout.setContentsMargins(10, 4, 10, 4)
-        layout.setSpacing(4)
+        layout = QtWidgets.QVBoxLayout(tela)
+        layout.setContentsMargins(12, 4, 12, 4)
+        layout.setSpacing(3)
+        layout.setAlignment(Qt.AlignCenter)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
         header = QtWidgets.QLabel("CHECKLIST DE SEGURANÇA")
         header.setFont(QFont("Arial", 13, QFont.Bold))
         header.setAlignment(Qt.AlignCenter)
-        header.setStyleSheet("color: #1A237E;")
+        header.setStyleSheet("color: #1A237E; background-color: transparent;")
 
         bloco1 = self.criar_bloco_pergunta(idx1)
         bloco2 = self.criar_bloco_pergunta(idx2)
 
         botoes_nav = QtWidgets.QHBoxLayout()
+        botoes_nav.setSpacing(8)
 
         btn_voltar = QtWidgets.QPushButton("◄ ANTERIOR")
-        btn_voltar.setFont(QFont("Arial", 13, QFont.Bold))
-        btn_voltar.setFixedHeight(45)
+        btn_voltar.setFont(QFont("Arial", 12, QFont.Bold))
+        btn_voltar.setFixedHeight(42)
         btn_voltar.setStyleSheet("background-color: #757575; color: white; border-radius: 6px;")
 
         idx_tela_atual = idx1 // 2
@@ -587,8 +710,8 @@ class SistemaGT(QtWidgets.QMainWindow):
                                                                f"CHK_PAG_{idx_tela_atual - 1}"))
 
         btn_proximo = QtWidgets.QPushButton("PRÓXIMO ►")
-        btn_proximo.setFont(QFont("Arial", 13, QFont.Bold))
-        btn_proximo.setFixedHeight(45)
+        btn_proximo.setFont(QFont("Arial", 12, QFont.Bold))
+        btn_proximo.setFixedHeight(42)
         btn_proximo.setStyleSheet("background-color: #1565C0; color: white; border-radius: 6px;")
         btn_proximo.clicked.connect(lambda: self.validar_e_avancar_pagina(idx_tela_atual))
 
@@ -596,39 +719,43 @@ class SistemaGT(QtWidgets.QMainWindow):
         botoes_nav.addWidget(btn_proximo)
 
         layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
-        layout.addWidget(header)
-        layout.addWidget(bloco1)
-        layout.addWidget(bloco2)
+        layout.addWidget(header, alignment=Qt.AlignCenter)
+        layout.addStretch(1)
+        layout.addWidget(bloco1, alignment=Qt.AlignCenter)
+        layout.addStretch(1)
+        layout.addWidget(bloco2, alignment=Qt.AlignCenter)
+        layout.addStretch(1)
         layout.addLayout(botoes_nav)
-
-        tela.setLayout(layout)
         return tela
 
     def criar_tela_pergunta_final(self, idx_pergunta):
         tela = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout()
-        layout.setContentsMargins(10, 4, 10, 4)
-        layout.setSpacing(6)
+        layout = QtWidgets.QVBoxLayout(tela)
+        layout.setContentsMargins(12, 4, 12, 4)
+        layout.setSpacing(5)
+        layout.setAlignment(Qt.AlignCenter)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
         header = QtWidgets.QLabel("CHECKLIST DE SEGURANÇA - FINALIZAÇÃO")
         header.setFont(QFont("Arial", 13, QFont.Bold))
         header.setAlignment(Qt.AlignCenter)
-        header.setStyleSheet("color: #1A237E;")
+        header.setStyleSheet("color: #1A237E; background-color: transparent;")
 
         bloco1 = self.criar_bloco_pergunta(idx_pergunta)
 
         botoes_nav = QtWidgets.QHBoxLayout()
+        botoes_nav.setSpacing(8)
+
         btn_voltar = QtWidgets.QPushButton("◄ ANTERIOR")
-        btn_voltar.setFont(QFont("Arial", 13, QFont.Bold))
-        btn_voltar.setFixedHeight(45)
+        btn_voltar.setFont(QFont("Arial", 12, QFont.Bold))
+        btn_voltar.setFixedHeight(42)
         btn_voltar.setStyleSheet("background-color: #757575; color: white; border-radius: 6px;")
         btn_voltar.clicked.connect(lambda: self.mudar_tela(self.telas_checklist_perguntas[4], "CHK_PAG_4"))
 
         btn_concluir = QtWidgets.QPushButton("CONCLUIR CHECKLIST")
-        btn_concluir.setFont(QFont("Arial", 13, QFont.Bold))
-        btn_concluir.setFixedHeight(45)
+        btn_concluir.setFont(QFont("Arial", 12, QFont.Bold))
+        btn_concluir.setFixedHeight(42)
         btn_concluir.setStyleSheet("background-color: #2E7D32; color: white; border-radius: 6px;")
         btn_concluir.clicked.connect(self.processar_finalizacao_checklist)
 
@@ -636,12 +763,11 @@ class SistemaGT(QtWidgets.QMainWindow):
         botoes_nav.addWidget(btn_concluir)
 
         layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
-        layout.addWidget(header)
-        layout.addWidget(bloco1)
-        layout.addStretch()
+        layout.addWidget(header, alignment=Qt.AlignCenter)
+        layout.addStretch(1)
+        layout.addWidget(bloco1, alignment=Qt.AlignCenter)
+        layout.addStretch(1)
         layout.addLayout(botoes_nav)
-
-        tela.setLayout(layout)
         return tela
 
     def validar_e_avancar_pagina(self, pagina_index):
@@ -677,9 +803,21 @@ class SistemaGT(QtWidgets.QMainWindow):
         lbl_sub.setStyleSheet("color: #E8F5E9;")
         lbl_sub.setAlignment(Qt.AlignCenter)
 
+        lbl_tempo = QtWidgets.QLabel("TEMPO RESTANTE")
+        lbl_tempo.setFont(QFont("Arial", 13, QFont.Bold))
+        lbl_tempo.setStyleSheet("color: #E8F5E9;")
+        lbl_tempo.setAlignment(Qt.AlignCenter)
+
+        self.lbl_tempo_restante = QtWidgets.QLabel("00:03:00")
+        self.lbl_tempo_restante.setFont(QFont("Arial", 32, QFont.Bold))
+        self.lbl_tempo_restante.setStyleSheet("color: white; background-color: transparent;")
+        self.lbl_tempo_restante.setAlignment(Qt.AlignCenter)
+
         layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
         layout.addWidget(self.lbl_msg_aprovado)
         layout.addWidget(lbl_sub)
+        layout.addWidget(lbl_tempo)
+        layout.addWidget(self.lbl_tempo_restante)
         tela.setLayout(layout)
         return tela
 
@@ -709,6 +847,26 @@ class SistemaGT(QtWidgets.QMainWindow):
         tela.setLayout(layout)
         return tela
 
+    def criar_tela_confirmacao_operacao(self):
+        tela = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(tela)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        self.lbl_confirmacao_operacao = QtWidgets.QLabel()
+        self.lbl_confirmacao_operacao.setFont(QFont("Arial", 24, QFont.Bold))
+        self.lbl_confirmacao_operacao.setAlignment(Qt.AlignCenter)
+        self.lbl_confirmacao_operacao.setStyleSheet("color: white; background-color: transparent;")
+        self.lbl_confirmacao_operacao.setWordWrap(True)
+        layout.addWidget(self.lbl_confirmacao_operacao, alignment=Qt.AlignCenter)
+        return tela
+
+    def mostrar_confirmacao_operacao(self, texto, cor_fundo):
+        self.tela_confirmacao_operacao.setStyleSheet(f"background-color: {cor_fundo};")
+        self.lbl_confirmacao_operacao.setText(texto)
+        self.mudar_tela(self.tela_confirmacao_operacao, "CONFIRMACAO_OPERACAO")
+        QTimer.singleShot(3000, lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
+
     # ========================================================================
     # PROCESSAMENTO DE CHECKLIST E LIBERAÇÃO
     # ========================================================================
@@ -717,14 +875,13 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.respostas_checklist.clear()
 
         for tela in self.telas_checklist_perguntas:
-            for groupbox in tela.findChildren(QtWidgets.QGroupBox):
-                for btn in groupbox.findChildren(QtWidgets.QPushButton):
-                    if btn.text() == "OK":
-                        btn.setStyleSheet(
-                            "background-color: #E8F5E9; color: #2E7D32; border: 2px solid #2E7D32; border-radius: 6px;")
-                    elif btn.text() == "NÃO OK":
-                        btn.setStyleSheet(
-                            "background-color: #FFEBEE; color: #C62828; border: 2px solid #C62828; border-radius: 6px;")
+            for btn in tela.findChildren(QtWidgets.QPushButton):
+                if btn.text() == "OK":
+                    btn.setStyleSheet(
+                        "background-color: #E8F5E9; color: #2E7D32; border: 2px solid #2E7D32; border-radius: 6px;")
+                elif btn.text() == "NÃO OK":
+                    btn.setStyleSheet(
+                        "background-color: #FFEBEE; color: #C62828; border: 2px solid #C62828; border-radius: 6px;")
 
         self.mudar_tela(self.telas_checklist_perguntas[0], "CHK_PAG_0")
 
@@ -762,14 +919,28 @@ class SistemaGT(QtWidgets.QMainWindow):
             self.mudar_tela(self.tela_reprovado_bloqueado, "SISTEMA_BLOQUEADO")
 
     def liberar_equipamento_por_3min(self, matricula, nome):
+        """Aciona os GPIOs e inicia o prazo único usado pelo bloqueio e pela tela."""
+        self.timer_liberacao.stop()
         set_gpios(1)
+        self.fim_liberacao = time.monotonic() + TEMPO_LIBERACAO_SEGUNDOS
         self.lbl_msg_aprovado.setText(f"Checklist Aprovado:\n[{matricula}] {nome}")
         self.mudar_tela(self.tela_aprovado, "EQUIPAMENTO_LIBERADO")
-        self.timer_liberacao.start(180000)
+        self.atualizar_cronometro_liberacao()
+        self.timer_liberacao.start(TEMPO_LIBERACAO_SEGUNDOS * 1000)
 
     def finalizar_tempo_liberacao(self):
+        """Desliga os GPIOs ao atingir o prazo e retorna ao menu."""
+        if self.fim_liberacao is None and not self.timer_liberacao.isActive():
+            set_gpios(0)
+            return
+
+        self.timer_liberacao.stop()
+        self.fim_liberacao = None
+        if hasattr(self, 'lbl_tempo_restante'):
+            self.lbl_tempo_restante.setText("00:00:00")
         set_gpios(0)
-        self.mudar_tela(self.tela_liberar_gt, "MENU_GT")
+        if self.central_widget.currentWidget() == self.tela_aprovado:
+            self.mudar_tela(self.tela_liberar_gt, "MENU_GT")
 
     # ========================================================================
     # PROCESSAMENTO DE LEITURA RFID
@@ -777,6 +948,15 @@ class SistemaGT(QtWidgets.QMainWindow):
     def processar_rfid(self, uid):
         agora = time.time()
         uid_clean = str(uid).strip()
+
+        # O RC522 continua lendo o cartão enquanto ele permanece sobre o
+        # leitor. Após aceitar o crachá mestre, não permitir que essa mesma
+        # leitura seja interpretada como o crachá do usuário.
+        if self.uid_bloqueado_ate_novo_cracha is not None:
+            if uid_clean == self.uid_bloqueado_ate_novo_cracha:
+                return
+            print(f"[RFID] Novo crachá detectado: {uid_clean}. Liberando próxima etapa.")
+            self.uid_bloqueado_ate_novo_cracha = None
 
         if uid_clean == self.ultimo_uid_lido and (agora - self.tempo_ultimo_lido) < 1.0:
             return
@@ -816,9 +996,9 @@ class SistemaGT(QtWidgets.QMainWindow):
         elif self.estado_atual == "HABILITAR_USUARIO_MESTRE":
             if uid_clean == UID_MESTRE:
                 self.estado_atual = "HABILITAR_USUARIO_FINAL"
-                self.ultimo_uid_lido = None
+                self.uid_bloqueado_ate_novo_cracha = UID_MESTRE
                 self.lbl_instrucao.setText("Aproxime o crachá do USUÁRIO")
-                self.lbl_status.setText("✓ Mestre Autorizado!\n\nAproxime o crachá do Usuário...")
+                self.lbl_status.setText("✓ Mestre Autorizado!\n\nRetire o crachá mestre e aproxime o do Usuário...")
                 self.lbl_status.setStyleSheet(
                     "color: #1B5E20; padding: 15px; border: 2px solid #2E7D32; border-radius: 10px; font-weight: bold; background-color: #E8F5E9;")
             else:
@@ -832,7 +1012,7 @@ class SistemaGT(QtWidgets.QMainWindow):
             func = self.dados.buscar_por_cracha(uid_clean)
             if func:
                 if self.dados.alterar_status(uid_clean, 'H'):
-                    self.mostrar_mensagem(f"SUCESSO\n\nUsuário HABILITADO!\n{func['nome']}", "#2E7D32", "white")
+                    self.mostrar_confirmacao_operacao("Usuário habilitado", "#2E7D32")
                 else:
                     self.mostrar_mensagem("ERRO\n\nFalha ao atualizar planilha!", "#C62828", "white")
             else:
@@ -841,9 +1021,9 @@ class SistemaGT(QtWidgets.QMainWindow):
         elif self.estado_atual == "DESABILITAR_USUARIO_MESTRE":
             if uid_clean == UID_MESTRE:
                 self.estado_atual = "DESABILITAR_USUARIO_FINAL"
-                self.ultimo_uid_lido = None
+                self.uid_bloqueado_ate_novo_cracha = UID_MESTRE
                 self.lbl_instrucao.setText("Aproxime o crachá do USUÁRIO")
-                self.lbl_status.setText("✓ Mestre Autorizado!\n\nAproxime o crachá do Usuário...")
+                self.lbl_status.setText("✓ Mestre Autorizado!\n\nRetire o crachá mestre e aproxime o do Usuário...")
                 self.lbl_status.setStyleSheet(
                     "color: #1B5E20; padding: 15px; border: 2px solid #2E7D32; border-radius: 10px; font-weight: bold; background-color: #E8F5E9;")
             else:
@@ -857,7 +1037,7 @@ class SistemaGT(QtWidgets.QMainWindow):
             func = self.dados.buscar_por_cracha(uid_clean)
             if func:
                 if self.dados.alterar_status(uid_clean, 'D'):
-                    self.mostrar_mensagem(f"SUCESSO\n\nUsuário DESABILITADO!\n{func['nome']}", "#EF6C00", "white")
+                    self.mostrar_confirmacao_operacao("Usuário desabilitado", "#C62828")
                 else:
                     self.mostrar_mensagem("ERRO\n\nFalha ao atualizar planilha!", "#C62828", "white")
             else:
@@ -926,9 +1106,19 @@ class SistemaGT(QtWidgets.QMainWindow):
             print(f"✗ Erro ao gerar PDF: {e}")
             return None
 
+    def keyPressEvent(self, event):
+        """Permite encerrar a aplicação com Alt+F4 mesmo em tela cheia."""
+        if event.key() == Qt.Key_F4 and event.modifiers() & Qt.AltModifier:
+            self.close()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def closeEvent(self, event):
+        self.timer_liberacao.stop()
+        self.fim_liberacao = None
         set_gpios(0)
-        self.serial.parar()
+        self.leitor_rfid.parar()
         event.accept()
 
 
