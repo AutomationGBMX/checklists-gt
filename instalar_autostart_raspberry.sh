@@ -3,45 +3,65 @@ set -eu
 
 PROJETO_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 LAUNCHER="$PROJETO_DIR/iniciar_sistema_gt.sh"
-AUTOSTART_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
-DESKTOP_FILE="$AUTOSTART_DIR/sistema-gt-rfid.desktop"
-LXDE_AUTOSTART="$HOME/.config/lxsession/LXDE-pi/autostart"
-BACKUP_DIR="$HOME/.config/sistema-gt-autostart-backup-$(date +%Y%m%d_%H%M%S)"
-PADRAO_PROJETO='(python|\.py|sistema|checklist|guincho|rfid|liberar[ _-]*gt)'
-PADRAO_COMANDO="^(Exec=.*|@.*)$PADRAO_PROJETO"
+REAL_USER="${SUDO_USER:-$(id -un)}"
+if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+    REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
+else
+    REAL_USER=$(id -un)
+    REAL_HOME="$HOME"
+fi
+[ -n "$REAL_HOME" ] || REAL_HOME="$HOME"
 
+AUTOSTART_DIR="$REAL_HOME/.config/autostart"
+DESKTOP_FILE="$AUTOSTART_DIR/sistema-gt-rfid.desktop"
+LXDE_AUTOSTART="$REAL_HOME/.config/lxsession/LXDE-pi/autostart"
+BACKUP_DIR="$REAL_HOME/.config/sistema-gt-autostart-backup-$(date +%Y%m%d_%H%M%S)"
+PADRAO_EXEC='^Exec=.*(python|\.py|/home|/opt|sistema|checklist|guincho|rfid|liberar[ _-]*gt)'
+PADRAO_LXDE='^@.*(python|\.py|/home|/opt|sistema|checklist|guincho|rfid|liberar[ _-]*gt)'
+
+if [ "$(id -u)" -eq 0 ]; then
+    PODE_ALTERAR_SISTEMA=1
+else
+    PODE_ALTERAR_SISTEMA=0
+fi
+
+backup_arquivo() {
+    arquivo="$1"
+    nome=$(printf '%s' "$arquivo" | sed 's#^/##; s#/#_#g')
+    mkdir -p "$BACKUP_DIR"
+    cp -p "$arquivo" "$BACKUP_DIR/$nome"
+}
+
+remover_desktop_usuario() {
+    arquivo="$1"
+    [ "$arquivo" = "$DESKTOP_FILE" ] && return 0
+    if grep -Eiq "$PADRAO_EXEC" "$arquivo"; then
+        backup_arquivo "$arquivo"
+        rm -f "$arquivo"
+        printf '%s\n' "Desativado autostart antigo: $arquivo"
+    fi
+}
+
+# Garante que o diretório do projeto seja o diretório de trabalho do programa.
 chmod +x "$LAUNCHER"
 mkdir -p "$AUTOSTART_DIR"
 
-backup_e_mover() {
-    arquivo="$1"
-    mkdir -p "$BACKUP_DIR"
-    cp -p "$arquivo" "$BACKUP_DIR/$(basename "$arquivo")"
-    rm -f "$arquivo"
-    printf '%s\n' "Entrada antiga desativada (backup): $arquivo"
-}
-
-# Remove somente autostarts de projetos/programas Python identificáveis.
-# Arquivos são preservados no diretório de backup para restauração manual.
+# Remove entradas antigas do autostart do usuário, mantendo backup.
 for arquivo in "$AUTOSTART_DIR"/*.desktop; do
     [ -f "$arquivo" ] || continue
-    [ "$arquivo" = "$DESKTOP_FILE" ] && continue
-    if grep -Eiq "$PADRAO_COMANDO" "$arquivo"; then
-        backup_e_mover "$arquivo"
-    fi
+    remover_desktop_usuario "$arquivo"
 done
 
-# Em Raspberry Pi OS com LXDE, esta lista pode iniciar programas antes do
-# diretório XDG. Se existir, ela será usada como única entrada do projeto.
+# Se o Raspberry usa LXDE, essa configuração tem prioridade sobre o XDG.
+# Mantém as linhas normais do LXDE e remove apenas comandos de projetos.
 if [ -f "$LXDE_AUTOSTART" ]; then
-    mkdir -p "$BACKUP_DIR"
-    cp -p "$LXDE_AUTOSTART" "$BACKUP_DIR/autostart.LXDE-pi"
+    backup_arquivo "$LXDE_AUTOSTART"
     tmp_file=$(mktemp)
-    grep -Eiv "$PADRAO_COMANDO" "$LXDE_AUTOSTART" > "$tmp_file" || true
+    grep -Eiv "$PADRAO_LXDE" "$LXDE_AUTOSTART" > "$tmp_file" || true
     printf '@%s\n' "$LAUNCHER" >> "$tmp_file"
     mv "$tmp_file" "$LXDE_AUTOSTART"
     rm -f "$DESKTOP_FILE"
-    printf '%s\n' "Autostart LXDE configurado: $LXDE_AUTOSTART"
+    printf '%s\n' "Checklist definido como autostart LXDE: $LXDE_AUTOSTART"
 else
     cat > "$DESKTOP_FILE" <<EOF
 [Desktop Entry]
@@ -54,20 +74,48 @@ Terminal=false
 StartupNotify=false
 X-GNOME-Autostart-enabled=true
 EOF
-    printf '%s\n' "Autostart XDG configurado: $DESKTOP_FILE"
+    printf '%s\n' "Checklist definido como autostart XDG: $DESKTOP_FILE"
 fi
 
-# Apenas informa se ainda existe uma entrada antiga em nível de sistema.
-for arquivo in /etc/xdg/autostart/*.desktop /etc/xdg/lxsession/LXDE-pi/autostart; do
-    [ -f "$arquivo" ] || continue
-    if grep -Eiq "$PADRAO_COMANDO" "$arquivo"; then
-        printf '%s\n' "ATENÇÃO: possível autostart antigo em nível de sistema: $arquivo"
-        printf '%s\n' "Revise esse arquivo com sudo se outro projeto continuar abrindo."
-    fi
-done
+# Quando executado com sudo, substitui também entradas antigas do sistema.
+if [ "$PODE_ALTERAR_SISTEMA" -eq 1 ]; then
+    for arquivo in /etc/xdg/autostart/*.desktop; do
+        [ -f "$arquivo" ] || continue
+        if grep -Eiq "$PADRAO_EXEC" "$arquivo" && ! grep -Fq "$LAUNCHER" "$arquivo"; then
+            backup_arquivo "$arquivo"
+            rm -f "$arquivo"
+            printf '%s\n' "Desativado autostart antigo do sistema: $arquivo"
+        fi
+    done
+
+    for arquivo in /etc/xdg/lxsession/*/autostart; do
+        [ -f "$arquivo" ] || continue
+        if grep -Eiq "$PADRAO_LXDE" "$arquivo"; then
+            backup_arquivo "$arquivo"
+            tmp_file=$(mktemp)
+            grep -Eiv "$PADRAO_LXDE" "$arquivo" > "$tmp_file" || true
+            mv "$tmp_file" "$arquivo"
+            printf '%s\n' "Removido comando antigo do sistema: $arquivo"
+        fi
+    done
+else
+    # Sem sudo, apenas informa se ainda há candidato em nível de sistema.
+    for arquivo in /etc/xdg/autostart/*.desktop /etc/xdg/lxsession/*/autostart; do
+        [ -f "$arquivo" ] || continue
+        if grep -Eiq "$PADRAO_EXEC|$PADRAO_LXDE" "$arquivo"; then
+            printf '%s\n' "ATENÇÃO: entrada antiga em nível de sistema: $arquivo"
+            printf '%s\n' "Execute este instalador novamente com sudo para desativá-la."
+        fi
+    done
+fi
 
 if [ -d "$BACKUP_DIR" ]; then
-    printf '%s\n' "Backups das entradas antigas: $BACKUP_DIR"
+    if [ "$(id -u)" -eq 0 ]; then
+        GRUPO_USUARIO=$(id -gn "$REAL_USER" 2>/dev/null || printf '%s' "$REAL_USER")
+        chown -R "$REAL_USER:$GRUPO_USUARIO" "$BACKUP_DIR" 2>/dev/null || true
+    fi
+    printf '%s\n' "Backup das configurações antigas: $BACKUP_DIR"
 fi
-printf '%s\n' "O projeto atual será iniciado no próximo login gráfico."
-printf '%s\n' "Para aplicar: sudo reboot"
+
+printf '%s\n' "Inicialização configurada exclusivamente para o checklist."
+printf '%s\n' "Reinicie com: sudo reboot"
