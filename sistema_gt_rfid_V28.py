@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Sistema Completo de Controle de Acesso GBMX - Liberar GT
+Sistema Completo de Controle de Acesso GBMX - Liberar GT Versão 30
 Otimizado para Tela Raspberry Pi de 5 Polegadas (800x480)
 """
 
@@ -387,6 +387,9 @@ class SistemaGT(QtWidgets.QMainWindow):
 
         self.ultimo_uid_lido = None
         self.tempo_ultimo_lido = 0
+        # Depois da autorização mestre, ignora leituras repetidas do mesmo
+        # cartão até que ele seja retirado e outro UID seja apresentado.
+        self.uid_bloqueado_ate_novo_cracha = None
 
         self.leitor_rfid = LeituraRC522()
         self.leitor_rfid.signals.uid_recebido.connect(self.processar_rfid)
@@ -515,6 +518,7 @@ class SistemaGT(QtWidgets.QMainWindow):
     def mudar_tela(self, tela, novo_estado):
         self.estado_atual = novo_estado
         self.ultimo_uid_lido = None
+        self.uid_bloqueado_ate_novo_cracha = None
         self.central_widget.setCurrentWidget(tela)
 
     # ========================================================================
@@ -945,6 +949,15 @@ class SistemaGT(QtWidgets.QMainWindow):
         agora = time.time()
         uid_clean = str(uid).strip()
 
+        # O RC522 continua lendo o cartão enquanto ele permanece sobre o
+        # leitor. Após aceitar o crachá mestre, não permitir que essa mesma
+        # leitura seja interpretada como o crachá do usuário.
+        if self.uid_bloqueado_ate_novo_cracha is not None:
+            if uid_clean == self.uid_bloqueado_ate_novo_cracha:
+                return
+            print(f"[RFID] Novo crachá detectado: {uid_clean}. Liberando próxima etapa.")
+            self.uid_bloqueado_ate_novo_cracha = None
+
         if uid_clean == self.ultimo_uid_lido and (agora - self.tempo_ultimo_lido) < 1.0:
             return
 
@@ -983,9 +996,9 @@ class SistemaGT(QtWidgets.QMainWindow):
         elif self.estado_atual == "HABILITAR_USUARIO_MESTRE":
             if uid_clean == UID_MESTRE:
                 self.estado_atual = "HABILITAR_USUARIO_FINAL"
-                self.ultimo_uid_lido = None
+                self.uid_bloqueado_ate_novo_cracha = UID_MESTRE
                 self.lbl_instrucao.setText("Aproxime o crachá do USUÁRIO")
-                self.lbl_status.setText("✓ Mestre Autorizado!\n\nAproxime o crachá do Usuário...")
+                self.lbl_status.setText("✓ Mestre Autorizado!\n\nRetire o crachá mestre e aproxime o do Usuário...")
                 self.lbl_status.setStyleSheet(
                     "color: #1B5E20; padding: 15px; border: 2px solid #2E7D32; border-radius: 10px; font-weight: bold; background-color: #E8F5E9;")
             else:
@@ -1008,9 +1021,9 @@ class SistemaGT(QtWidgets.QMainWindow):
         elif self.estado_atual == "DESABILITAR_USUARIO_MESTRE":
             if uid_clean == UID_MESTRE:
                 self.estado_atual = "DESABILITAR_USUARIO_FINAL"
-                self.ultimo_uid_lido = None
+                self.uid_bloqueado_ate_novo_cracha = UID_MESTRE
                 self.lbl_instrucao.setText("Aproxime o crachá do USUÁRIO")
-                self.lbl_status.setText("✓ Mestre Autorizado!\n\nAproxime o crachá do Usuário...")
+                self.lbl_status.setText("✓ Mestre Autorizado!\n\nRetire o crachá mestre e aproxime o do Usuário...")
                 self.lbl_status.setStyleSheet(
                     "color: #1B5E20; padding: 15px; border: 2px solid #2E7D32; border-radius: 10px; font-weight: bold; background-color: #E8F5E9;")
             else:
