@@ -1,29 +1,25 @@
-pgrep -af 'python|\.py'
+------------------------------------------------------
 
+# Lista todos os serviços que iniciam automaticamente
+systemctl list-unit-files --state=enabled
 
-1234 python3 /home/pi/outro_projeto.py
+# Se achar algo suspeito (ex: "sistema-oc.service", "meu-programa.service"):
+sudo systemctl status nome-do-servico.service
 
+sudo systemctl stop nome-do-servico.service      # para agora
+sudo systemctl disable nome-do-servico.service   # impede de iniciar no próximo boot
 
-kill 1234
+sudo rm /etc/systemd/system/nome-do-servico.service
+sudo systemctl daemon-reload
 
-kill -9 1234
+crontab -l
 
-grep -RInE 'Exec=.*(python|\.py|checklist|rfid|guincho|sistema)|^@.*(python|\.py|checklist|rfid|guincho|sistema)' \
-"$HOME/.config/autostart" \
-"$HOME/.config/lxsession" \
-/etc/xdg/autostart \
-/etc/xdg/lxsession 2>/dev/null
+crontab -e
 
+cat ~/.config/lxsession/LXDE-pi/autostart
 
+cat /etc/rc.local
 
-systemctl --user --type=service --state=running --no-pager | grep -Ei 'python|check|rfid|guincho|sistema'
-systemctl --type=service --state=running --no-pager | grep -Ei 'python|check|rfid|guincho|sistema'
+ps aux | grep python
 
-
-cd /caminho/da/pasta/do/projeto
-
-chmod +x instalar_autostart_raspberry.sh iniciar_sistema_gt.sh
-sudo ./instalar_autostart_raspberry.sh
-sudo systemctl set-default graphical.target
-sudo reboot
-
+grep -r "nome_do_script.py" /etc/systemd/system/ /etc/xdg/ ~/.config/ /etc/rc.local 2>/dev/null
