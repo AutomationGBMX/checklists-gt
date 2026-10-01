@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Sistema Completo de Controle de Acesso GBMX - Liberar GT
+Sistema Completo de Controle de Acesso GBMX e ChecKlist de Segurança - Liberar GT
 Otimizado para Tela Raspberry Pi de 5 Polegadas (800x480)
+Versão 32 - 01/10/2026
 """
 
 import sys
