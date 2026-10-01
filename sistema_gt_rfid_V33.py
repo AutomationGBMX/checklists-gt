@@ -410,6 +410,11 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.timer_liberacao.timeout.connect(self.finalizar_tempo_liberacao)
         self.fim_liberacao = None
 
+        # Timer visual independente do timer único de bloqueio.
+        self.timer_cronometro = QTimer(self)
+        self.timer_cronometro.setInterval(1000)
+        self.timer_cronometro.timeout.connect(self.atualizar_cronometro_liberacao)
+
         self.timer_relogio = QTimer(self)
         self.timer_relogio.timeout.connect(self.atualizar_relogio)
         self.timer_relogio.start(1000)
@@ -470,7 +475,6 @@ class SistemaGT(QtWidgets.QMainWindow):
         texto = f"{datetime.now().strftime('%d/%m/%Y - %H:%M:%S')}  |  {self.obter_texto_turno_atual()}"
         for lbl in self.labels_data_hora:
             lbl.setText(texto)
-        self.atualizar_cronometro_liberacao()
 
     def atualizar_cronometro_liberacao(self):
         """Exibe o tempo restante calculado a partir do prazo real de bloqueio."""
@@ -479,14 +483,16 @@ class SistemaGT(QtWidgets.QMainWindow):
 
         restante = self.fim_liberacao - time.monotonic()
         if restante <= 0:
-            self.lbl_tempo_restante.setText("00:00:00")
+            if hasattr(self, 'lbl_tempo_restante'):
+                self.lbl_tempo_restante.setText("00:00:00")
             self.finalizar_tempo_liberacao()
             return
 
         segundos = int(restante + 0.999999)
         horas, resto = divmod(segundos, 3600)
         minutos, segundos = divmod(resto, 60)
-        self.lbl_tempo_restante.setText(f"{horas:02d}:{minutos:02d}:{segundos:02d}")
+        if hasattr(self, 'lbl_tempo_restante'):
+            self.lbl_tempo_restante.setText(f"{horas:02d}:{minutos:02d}:{segundos:02d}")
 
     def configurar_interface(self):
         self.setWindowTitle("SISTEMA GBMX - LIBERAR GT")
@@ -1008,26 +1014,29 @@ class SistemaGT(QtWidgets.QMainWindow):
     def liberar_equipamento_por_3min(self, matricula, nome):
         """Aciona os GPIOs e inicia o prazo único usado pelo bloqueio e pela tela."""
         self.timer_liberacao.stop()
+        self.timer_cronometro.stop()
         set_gpios(1)
         self.fim_liberacao = time.monotonic() + TEMPO_LIBERACAO_SEGUNDOS
         self.lbl_msg_aprovado.setText(f"Checklist Aprovado:\n[{matricula}] {nome}")
         self.mudar_tela(self.tela_aprovado, "EQUIPAMENTO_LIBERADO")
         self.atualizar_cronometro_liberacao()
+        self.timer_cronometro.start()
         self.timer_liberacao.start(TEMPO_LIBERACAO_SEGUNDOS * 1000)
 
     def finalizar_tempo_liberacao(self):
         """Desliga os GPIOs ao atingir o prazo e retorna ao menu."""
         if self.fim_liberacao is None and not self.timer_liberacao.isActive():
+            self.timer_cronometro.stop()
             set_gpios(0)
             return
 
         self.timer_liberacao.stop()
+        self.timer_cronometro.stop()
         self.fim_liberacao = None
         if hasattr(self, 'lbl_tempo_restante'):
             self.lbl_tempo_restante.setText("00:00:00")
         set_gpios(0)
-        if self.central_widget.currentWidget() == self.tela_aprovado:
-            self.mudar_tela(self.tela_liberar_gt, "MENU_GT")
+        self.mudar_tela(self.tela_liberar_gt, "MENU_GT")
 
     # ========================================================================
     # PROCESSAMENTO DE LEITURA RFID
@@ -1203,6 +1212,7 @@ class SistemaGT(QtWidgets.QMainWindow):
 
     def closeEvent(self, event):
         self.timer_liberacao.stop()
+        self.timer_cronometro.stop()
         self.fim_liberacao = None
         set_gpios(0)
         self.leitor_rfid.parar()
