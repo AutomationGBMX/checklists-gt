@@ -67,6 +67,11 @@ class RFIDSignals(QObject):
     uid_recebido = pyqtSignal(str)
 
 
+class ChecklistSignals(QObject):
+    """Sinais para devolver o resultado do PDF à thread da interface."""
+    pdf_pronto = pyqtSignal(object, object)
+
+
 class LeituraRC522(threading.Thread):
     def __init__(self):
         super().__init__()
@@ -385,6 +390,10 @@ class SistemaGT(QtWidgets.QMainWindow):
 
         self.operador_atual = None
         self.respostas_checklist = {}
+        self.finalizacao_em_andamento = False
+        self.finalizacao_sinais = ChecklistSignals()
+        self.finalizacao_sinais.pdf_pronto.connect(self._concluir_finalizacao_checklist)
+        self.thread_finalizacao = None
 
         self.ultimo_uid_lido = None
         self.tempo_ultimo_lido = 0
@@ -504,6 +513,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.tela_aprovado = self.criar_tela_aprovado()
         self.tela_reprovado_bloqueado = self.criar_tela_reprovado_bloqueado()
         self.tela_confirmacao_operacao = self.criar_tela_confirmacao_operacao()
+        self.tela_processando_checklist = self.criar_tela_processando_checklist()
 
         self.central_widget.addWidget(self.tela_liberar_gt)
         self.central_widget.addWidget(self.tela_leitura)
@@ -512,6 +522,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.central_widget.addWidget(self.tela_aprovado)
         self.central_widget.addWidget(self.tela_reprovado_bloqueado)
         self.central_widget.addWidget(self.tela_confirmacao_operacao)
+        self.central_widget.addWidget(self.tela_processando_checklist)
 
         self.central_widget.setCurrentWidget(self.tela_liberar_gt)
         self.estado_atual = "MENU_GT"
@@ -755,6 +766,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         btn_voltar.clicked.connect(lambda: self.mudar_tela(self.telas_checklist_perguntas[4], "CHK_PAG_4"))
 
         btn_concluir = QtWidgets.QPushButton("CONCLUIR CHECKLIST")
+        self.btn_concluir_checklist = btn_concluir
         btn_concluir.setFont(QFont("Arial", 12, QFont.Bold))
         btn_concluir.setFixedHeight(42)
         btn_concluir.setStyleSheet("background-color: #2E7D32; color: white; border-radius: 6px;")
@@ -848,6 +860,20 @@ class SistemaGT(QtWidgets.QMainWindow):
         tela.setLayout(layout)
         return tela
 
+    def criar_tela_processando_checklist(self):
+        """Tela transitória para impedir que a página final pareça travada."""
+        tela = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(tela)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        lbl = QtWidgets.QLabel("Finalizando checklist...\nAguarde, gerando o registro.")
+        lbl.setFont(QFont("Arial", 20, QFont.Bold))
+        lbl.setAlignment(Qt.AlignCenter)
+        lbl.setStyleSheet("color: #1A237E; background-color: transparent;")
+        layout.addWidget(lbl, alignment=Qt.AlignCenter)
+        return tela
+
     def criar_tela_confirmacao_operacao(self):
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(tela)
@@ -874,6 +900,9 @@ class SistemaGT(QtWidgets.QMainWindow):
     def iniciar_checklist_para_usuario(self, func_dados):
         self.operador_atual = func_dados
         self.respostas_checklist.clear()
+        self.finalizacao_em_andamento = False
+        if hasattr(self, "btn_concluir_checklist"):
+            self.btn_concluir_checklist.setEnabled(True)
 
         for tela in self.telas_checklist_perguntas:
             for btn in tela.findChildren(QtWidgets.QPushButton):
@@ -887,11 +916,25 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.mudar_tela(self.telas_checklist_perguntas[0], "CHK_PAG_0")
 
     def processar_finalizacao_checklist(self):
-        if len(self.respostas_checklist) != len(self.perguntas):
-            QtWidgets.QMessageBox.warning(self, "Atenção", "Responda a todas as perguntas.")
+        """Valida e inicia a finalização sem bloquear a thread da interface."""
+        if self.finalizacao_em_andamento:
             return
 
-        respostas_lista = [self.respostas_checklist[i] for i in range(len(self.perguntas))]
+        total_perguntas = len(self.perguntas)
+        if len(self.respostas_checklist) != total_perguntas:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Atenção",
+                "Responda a todas as perguntas antes de concluir o checklist."
+            )
+            return
+
+        if self.operador_atual is None:
+            QtWidgets.QMessageBox.warning(self, "Atenção", "Nenhum operador identificado.")
+            self.mudar_tela(self.tela_liberar_gt, "MENU_GT")
+            return
+
+        respostas_lista = [self.respostas_checklist[i] for i in range(total_perguntas)]
         reprovado = "NÃO OK" in respostas_lista
 
         dados_checklist = {
@@ -904,19 +947,62 @@ class SistemaGT(QtWidgets.QMainWindow):
             'status': "REPROVADO" if reprovado else "APROVADO"
         }
 
-        pdf_path = self.gerar_pdf_checklist(dados_checklist)
-        if pdf_path:
-            threading.Thread(target=self.git.fazer_upload_pdf, args=(pdf_path,), daemon=True).start()
+        self.finalizacao_em_andamento = True
+        self.btn_concluir_checklist.setEnabled(False)
+        self.mudar_tela(self.tela_processando_checklist, "PROCESSANDO_CHECKLIST")
 
-        if not reprovado:
+        self.thread_finalizacao = threading.Thread(
+            target=self._gerar_pdf_em_background,
+            args=(dados_checklist,),
+            daemon=True
+        )
+        self.thread_finalizacao.start()
+
+    def _gerar_pdf_em_background(self, dados_checklist):
+        """Gera o PDF fora da thread Qt e devolve o resultado por sinal."""
+        try:
+            pdf_path = self.gerar_pdf_checklist(dados_checklist)
+        except Exception as erro:
+            print(f"[CHECKLIST] Erro na finalização em segundo plano: {erro}")
+            pdf_path = None
+        self.finalizacao_sinais.pdf_pronto.emit(dados_checklist, pdf_path)
+
+    def _concluir_finalizacao_checklist(self, dados_checklist, pdf_path):
+        """Conclui a transição na thread principal depois que o PDF terminou."""
+        self.thread_finalizacao = None
+
+        if not pdf_path:
+            self.finalizacao_em_andamento = False
+            self.btn_concluir_checklist.setEnabled(True)
+            self.mudar_tela(self.tela_liberar_gt, "MENU_GT")
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Erro",
+                "Não foi possível gerar o PDF do checklist."
+            )
+            return
+
+        # O upload continua separado para não atrasar a mudança de tela.
+        threading.Thread(
+            target=self.git.fazer_upload_pdf,
+            args=(pdf_path,),
+            daemon=True
+        ).start()
+
+        if dados_checklist['status'] == "APROVADO":
             turno_atual = self.obter_turno_atual()
             if turno_atual not in self.checklists_aprovados_turno:
                 self.checklists_aprovados_turno[turno_atual] = set()
-            self.checklists_aprovados_turno[turno_atual].add(self.operador_atual['matricula'])
+            self.checklists_aprovados_turno[turno_atual].add(dados_checklist['matricula'])
 
-            self.liberar_equipamento_por_3min(self.operador_atual['matricula'], self.operador_atual['nome'])
+            self.finalizacao_em_andamento = False
+            self.liberar_equipamento_por_3min(
+                dados_checklist['matricula'],
+                dados_checklist['operador']
+            )
         else:
             self.invalidar_checklists_do_turno()
+            self.finalizacao_em_andamento = False
             self.mudar_tela(self.tela_reprovado_bloqueado, "SISTEMA_BLOQUEADO")
 
     def liberar_equipamento_por_3min(self, matricula, nome):
