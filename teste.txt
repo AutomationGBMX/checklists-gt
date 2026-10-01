@@ -1,6 +1,3 @@
-cd /caminho/da/pasta/do/projeto
-
-chmod +x instalar_autostart_raspberry.sh iniciar_sistema_gt.sh
-sudo ./instalar_autostart_raspberry.sh
-sudo systemctl set-default graphical.target
+chmod +x instalar_autostart_raspberry.sh
+./instalar_autostart_raspberry.sh
 sudo reboot
