@@ -1,25 +1,6 @@
-------------------------------------------------------
+cd /caminho/da/pasta/do/projeto
 
-# Lista todos os serviços que iniciam automaticamente
-systemctl list-unit-files --state=enabled
-
-# Se achar algo suspeito (ex: "sistema-oc.service", "meu-programa.service"):
-sudo systemctl status nome-do-servico.service
-
-sudo systemctl stop nome-do-servico.service      # para agora
-sudo systemctl disable nome-do-servico.service   # impede de iniciar no próximo boot
-
-sudo rm /etc/systemd/system/nome-do-servico.service
-sudo systemctl daemon-reload
-
-crontab -l
-
-crontab -e
-
-cat ~/.config/lxsession/LXDE-pi/autostart
-
-cat /etc/rc.local
-
-ps aux | grep python
-
-grep -r "nome_do_script.py" /etc/systemd/system/ /etc/xdg/ ~/.config/ /etc/rc.local 2>/dev/null
+chmod +x instalar_autostart_raspberry.sh iniciar_sistema_gt.sh
+sudo ./instalar_autostart_raspberry.sh
+sudo systemctl set-default graphical.target
+sudo reboot
