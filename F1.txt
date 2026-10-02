@@ -1,0 +1,1 @@
+python3 -m py_compile sistema_gt_rfid_V33.py

@@ -1,2 +1,0 @@
-test -f sistema_gt_rfid_V33.py && echo "V33 OK"
-grep Exec ~/.config/autostart/sistema-gt-rfid.desktop
