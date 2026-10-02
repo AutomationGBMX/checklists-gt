@@ -1,4 +1,0 @@
-find /home/alex -type f \( \
--name "sistema_gt_rfid_V33.py" -o \
--name "iniciar_sistema_gt.sh" \
-\) -print 2>/dev/null

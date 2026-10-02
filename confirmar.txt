@@ -1,0 +1,2 @@
+sudo pkill -f '/home/alex/projects/rainplantrasp/main.py'
+sudo pkill -f '/home/alex/projects/rainplant_v4/main.py'

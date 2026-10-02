@@ -1,0 +1,1 @@
+ps -eo pid,user,cmd | grep -E '[p]ython|[r]ainplant|[r]ainplan'

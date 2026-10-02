@@ -1,5 +1,0 @@
-grep -RInE "rainplantrasp|projects/rainplantrasp|main.py" \
-/home/alex/.config \
-/etc/xdg \
-/etc/systemd \
-/lib/systemd 2>/dev/null

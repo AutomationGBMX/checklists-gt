@@ -1,0 +1,4 @@
+cd /home/alex/Desktop/Checklist_V1/checklists-repo
+unzip -o ~/Downloads/pacote_checklist_gt_corrigido.zip
+chmod +x iniciar_sistema_gt.sh instalar_autostart_raspberry.sh
+ls -l sistema_gt_rfid_V33.py iniciar_sistema_gt.sh
