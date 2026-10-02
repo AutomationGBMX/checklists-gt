@@ -1,0 +1,11 @@
+sudo systemctl status checklist-gt-fullscreen.service checklist-gt.service --no-pager -l
+
+echo "=== habilitação ==="
+sudo systemctl is-enabled checklist-gt-fullscreen.service checklist-gt.service
+
+echo "=== arquivos dos serviços ==="
+sudo systemctl cat checklist-gt-fullscreen.service
+sudo systemctl cat checklist-gt.service
+
+echo "=== processos ==="
+ps -eo pid,ppid,user,cmd | grep -E '[s]istema_gt|[c]hecklist|[p]ython'
