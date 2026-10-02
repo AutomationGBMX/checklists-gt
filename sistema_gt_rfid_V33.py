@@ -22,7 +22,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib import colors
 from PyQt5 import QtWidgets
 from PyQt5.QtGui import QFont
-from PyQt5.QtCore import pyqtSignal, QObject, Qt, QTimer
+from PyQt5.QtCore import pyqtSignal, pyqtSlot, QObject, Qt, QTimer
 
 # ============================================================================
 # CONFIGURAÇÕES E GPIO
@@ -391,8 +391,11 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.operador_atual = None
         self.respostas_checklist = {}
         self.finalizacao_em_andamento = False
-        self.finalizacao_sinais = ChecklistSignals()
-        self.finalizacao_sinais.pdf_pronto.connect(self._concluir_finalizacao_checklist)
+        self.finalizacao_sinais = ChecklistSignals(self)
+        self.finalizacao_sinais.pdf_pronto.connect(
+            self._concluir_finalizacao_checklist,
+            type=Qt.QueuedConnection
+        )
         self.thread_finalizacao = None
 
         self.ultimo_uid_lido = None
@@ -973,6 +976,7 @@ class SistemaGT(QtWidgets.QMainWindow):
             pdf_path = None
         self.finalizacao_sinais.pdf_pronto.emit(dados_checklist, pdf_path)
 
+    @pyqtSlot(object, object)
     def _concluir_finalizacao_checklist(self, dados_checklist, pdf_path):
         """Conclui a transição na thread principal depois que o PDF terminou."""
         self.thread_finalizacao = None
@@ -1020,7 +1024,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.lbl_msg_aprovado.setText(f"Checklist Aprovado:\n[{matricula}] {nome}")
         self.mudar_tela(self.tela_aprovado, "EQUIPAMENTO_LIBERADO")
         self.atualizar_cronometro_liberacao()
-        self.timer_cronometro.start()
+        self.timer_cronometro.start(1000)
         self.timer_liberacao.start(TEMPO_LIBERACAO_SEGUNDOS * 1000)
 
     def finalizar_tempo_liberacao(self):
