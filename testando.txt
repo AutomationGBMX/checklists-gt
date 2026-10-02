@@ -1,7 +1,1 @@
-cd ~/Desktop/Checklist_V1/checklists-repo
-
-cp sistema_gt_rfid_V33.py sistema_gt_rfid_V33.bak
-unzip -o /pacote_checklist_gt_v33_timer_corrigido.zip
-
-python3 -m py_compile sistema_gt_rfid_V33.py
 grep -nE 'timer_verificacao_finalizacao|def verificar_finalizacao_checklist|timer_cronometro.start' sistema_gt_rfid_V33.py
