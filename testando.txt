@@ -1,1 +1,0 @@
-grep -nE 'timer_verificacao_finalizacao|def verificar_finalizacao_checklist|timer_cronometro.start' sistema_gt_rfid_V33.py
