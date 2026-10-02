@@ -1,0 +1,3 @@
+sudo systemctl mask --now checklist-gt-fullscreen.service checklist-gt.service
+sudo systemctl mask --now myscript.service rainplant_v4.service
+sudo systemctl daemon-reload
