@@ -1,0 +1,4 @@
+
+tail -n 100 sistema_gt.log
+
+ps -eo pid,user,cmd | grep -E '[s]istema_gt|[p]ython|[r]ainplant'

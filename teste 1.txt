@@ -1,0 +1,7 @@
+sudo systemctl stop --now myscript.service rainplant_v4.service 2>/dev/null || true
+
+sudo pkill -f '/home/alex/projects/rainplantrasp/main.py' 2>/dev/null || true
+sudo pkill -f '/home/alex/projects/rainplant_v4/main.py' 2>/dev/null || true
+
+python3 -m py_compile sistema_gt_rfid_V33.py
+./iniciar_sistema_gt.sh
