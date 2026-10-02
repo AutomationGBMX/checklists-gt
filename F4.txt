@@ -1,0 +1,24 @@
+echo "=== PROCESSOS ==="
+pgrep -af 'python|sistema_gt|checklist|rainplant'
+
+echo "=== PROCESSO V33 ==="
+for p in $(pgrep -f 'sistema_gt_rfid_V33.py'); do
+    ps -o pid,ppid,user,lstart,cmd -p "$p"
+    echo "cwd:"
+    readlink -f "/proc/$p/cwd"
+    echo "ambiente:"
+    tr '\0' '\n' < "/proc/$p/environ" | grep -E '^(DISPLAY|XAUTHORITY|HOME|PWD|XDG_RUNTIME_DIR)='
+done
+
+echo "=== SERVIÇOS CARREGADOS ==="
+systemctl list-units --all | grep -Ei 'checklist|rainplant|myscript' || true
+
+echo "=== AUTOSTARTS ==="
+grep -RInE 'sistema_gt|start_checklist|checklist|python|\.py' \
+"$HOME/.config/autostart" \
+"$HOME/.config/lxsession" \
+/etc/xdg/autostart \
+/etc/systemd/system 2>/dev/null || true
+
+echo "=== LOG ==="
+tail -n 120 "$HOME/Desktop/Checklist_V1/checklists-repo/sistema_gt.log" 2>/dev/null || true
