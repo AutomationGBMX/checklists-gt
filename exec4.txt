@@ -1,0 +1,6 @@
+PID=$(pgrep -f '/home/alex/Desktop/Checklist_V1/checklists-repo/sistema_gt_rfid_V33.py' | head -n1)
+
+if [ -n "$PID" ]; then
+    pkill -f '/home/alex/Desktop/Checklist_V1/checklists-repo/checklists-repo' 2>/dev/null || true
+    kill "$PID" 2>/dev/null || true
+fi

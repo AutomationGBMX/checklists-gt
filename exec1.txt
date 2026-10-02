@@ -1,0 +1,6 @@
+mkdir -p /home/alex/checklist_gt
+
+find . -mindepth 1 -maxdepth 1 ! -name 'checklists-repo' \
+  -exec cp -a -- {} /home/alex/checklist_gt/ \;
+
+chmod +x /home/alex/checklist_gt/iniciar_sistema_gt.sh

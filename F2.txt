@@ -1,4 +1,0 @@
-
-
-grep -nE 'uid_recebido.connect|pyqtSlot\(str\)|timer_cronometro.start' \
-sistema_gt_rfid_V33.py
