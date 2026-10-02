@@ -1,0 +1,10 @@
+cd "$(dirname "$(readlink -f iniciar_sistema_gt.sh)")"
+
+echo "Pasta atual:"
+pwd
+
+echo "Arquivo V33:"
+ls -l sistema_gt_rfid_V33.py
+
+echo "Verificação do cronômetro:"
+grep -n "timer_cronometro" sistema_gt_rfid_V33.py
