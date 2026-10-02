@@ -1,2 +1,0 @@
-python3 -m py_compile sistema_gt_rfid_V33.py
-grep -nE '_aplicar_resultado_checklist|_gerar_pdf_e_enviar_em_background|timer_cronometro.start' sistema_gt_rfid_V33.py

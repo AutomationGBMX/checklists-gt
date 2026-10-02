@@ -1,0 +1,1 @@
+systemctl list-unit-files | grep -E 'checklist-gt|myscript|rainplant'

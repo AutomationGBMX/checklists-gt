@@ -1,0 +1,23 @@
+sudo systemctl stop checklist-gt-fullscreen.service checklist-gt.service myscript.service rainplant_v4.service 2>/dev/null || true
+
+sudo mkdir -p /root/backup-servicos-checklist
+
+for servico in \
+  checklist-gt-fullscreen.service \
+  checklist-gt.service \
+  myscript.service \
+  rainplant_v4.service
+do
+  if [ -f "/etc/systemd/system/$servico" ]; then
+    sudo mv "/etc/systemd/system/$servico" \
+      "/root/backup-servicos-checklist/$servico"
+  fi
+done
+
+sudo rm -f /etc/systemd/system/multi-user.target.wants/checklist-gt-fullscreen.service
+sudo rm -f /etc/systemd/system/multi-user.target.wants/checklist-gt.service
+sudo rm -f /etc/systemd/system/multi-user.target.wants/myscript.service
+sudo rm -f /etc/systemd/system/multi-user.target.wants/rainplant_v4.service
+
+sudo systemctl daemon-reload
+sudo systemctl reset-failed

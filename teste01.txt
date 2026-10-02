@@ -1,1 +1,0 @@
-cp sistema_gt_rfid_V33.py sistema_gt_rfid_V33.bak
