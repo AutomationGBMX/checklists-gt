@@ -1,1 +1,2 @@
-grep Exec ~/.config/autostart/sistema-gt-rfid.desktop
+systemctl is-active checklist-gt-fullscreen.service checklist-gt.service myscript.service rainplant_v4.service
+
