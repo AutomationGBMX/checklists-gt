@@ -1,1 +1,0 @@
-ps -eo pid,ppid,user,cmd | grep -E '[r]ainplan|[c]hecklist-gt|[s]istema_gt'

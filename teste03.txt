@@ -1,0 +1,1 @@
+./iniciar_sistema_gt.sh

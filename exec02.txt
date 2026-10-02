@@ -1,2 +1,0 @@
-systemctl is-enabled checklist-gt-fullscreen.service checklist-gt.service
-systemctl is-active checklist-gt-fullscreen.service checklist-gt.service
