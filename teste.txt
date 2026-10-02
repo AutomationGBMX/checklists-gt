@@ -1,3 +1,0 @@
-chmod +x instalar_autostart_raspberry.sh
-./instalar_autostart_raspberry.sh
-sudo reboot
