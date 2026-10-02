@@ -1,0 +1,10 @@
+env -i \
+HOME=/home/alex \
+USER=alex \
+LOGNAME=alex \
+DISPLAY=:0 \
+XAUTHORITY=/home/alex/.Xauthority \
+XDG_RUNTIME_DIR=/run/user/1000 \
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+/usr/bin/python3 -u \
+/home/alex/Desktop/Checklist_V1/checklists-repo/sistema_gt_rfid_V33.py
