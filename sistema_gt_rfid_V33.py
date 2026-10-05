@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Sistema Completo de Controle de Acesso GBMX e ChecKlist de Segurança - Liberar GT
+Sistema Completo de Controle de Acesso GBMX e Checklist de Segurança - Liberar GT
 Otimizado para Tela Raspberry Pi de 5 Polegadas (800x480)
-Versão 32 - 01/10/2026
+Versão 33 - Sem Integração Git (Operação 100% Local)
 """
 
 import sys
 import os
 import threading
 import time
-import subprocess
-import shutil
 import pandas as pd
 from datetime import datetime, timedelta
 
@@ -29,8 +27,6 @@ from PyQt5.QtCore import pyqtSignal, pyqtSlot, QObject, Qt, QTimer
 # ============================================================================
 UID_MESTRE = "3293600699"
 
-REPO_URL = os.environ.get("GITHUB_REPO_URL", "https://github.com/AutomationGBMX/checklists-gt.git")
-REPO_LOCAL = os.path.abspath("./checklists-repo")
 PASTA_CHECKLISTS = os.path.abspath("./checklists")
 TEMPO_LIBERACAO_SEGUNDOS = 180
 
@@ -76,26 +72,16 @@ class LeituraRC522(threading.Thread):
 
     @staticmethod
     def converter_uid_rc522(id_card):
-        """Converte o ID bruto do RC522 para o UID usado na planilha.
-
-        Nesta leitura, o valor chega empacotado em cinco bytes. Os quatro
-        primeiros bytes representam o UID em ordem invertida e o último byte
-        não faz parte do número usado pela base de crachás.
-        Exemplo: 804690904180 (BB 5B 50 C4 74) -> 3293600699.
-        """
         try:
             valor = int(id_card)
             if valor <= 0:
                 return ""
 
-            # IDs acima de 32 bits correspondem ao formato bruto observado
-            # no RC522: UID de quatro bytes + byte adicional.
             if valor > 0xFFFFFFFF:
                 num_bytes = (valor.bit_length() + 7) // 8
                 uid_bytes = valor.to_bytes(num_bytes, byteorder="big")
                 return str(int.from_bytes(uid_bytes[:4], byteorder="little"))
 
-            # Se o driver já devolver um UID normalizado de 32 bits, preservá-lo.
             return str(valor)
         except (TypeError, ValueError, OverflowError):
             return str(id_card).strip()
@@ -146,10 +132,8 @@ class GerenciadorDados:
     def carregar_planilha(self):
         try:
             if os.path.exists(self.arquivo):
-                # Importa forçando tudo como STRING para não estragar os UIDs dos crachás
                 self.df = pd.read_excel(self.arquivo, dtype=str)
 
-                # Normaliza nomes de colunas
                 mapeamento = {}
                 for col in self.df.columns:
                     col_norm = str(col).strip().upper()
@@ -192,7 +176,6 @@ class GerenciadorDados:
         v_str = str(valor).strip()
         if v_str.endswith('.0'):
             v_str = v_str[:-2]
-        # Tenta extrair apenas dígitos numéricos para comparação limpa
         try:
             return str(int(v_str))
         except ValueError:
@@ -242,135 +225,6 @@ class GerenciadorDados:
 
 
 # ============================================================================
-# GERENCIADOR GITHUB
-# ============================================================================
-class GerenciadorGitHub:
-    """Mantém uma única cópia local do repositório e publica os PDFs nela."""
-
-    def __init__(self):
-        self.repo_url = REPO_URL
-        self.repo_abs = os.path.abspath(REPO_LOCAL)
-        self.inicializar_repo()
-
-    def _git(self, argumentos, timeout=60):
-        return subprocess.run(
-            ["git", "-C", self.repo_abs, *argumentos],
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
-
-    def inicializar_repo(self):
-        """Reutiliza o repositório existente ou clona uma única vez se necessário."""
-        try:
-            caminho_git = os.path.join(self.repo_abs, '.git')
-            if os.path.exists(caminho_git):
-                print(f"[GIT] Repositório existente reutilizado: {self.repo_abs}")
-                return True
-
-            if os.path.exists(self.repo_abs):
-                if os.listdir(self.repo_abs):
-                    print(f"[GIT] Erro: {self.repo_abs} existe, mas não é um repositório Git.")
-                    return False
-                os.rmdir(self.repo_abs)
-
-            print(f"[GIT] Clonando repositório uma única vez em {self.repo_abs}...")
-            resultado = subprocess.run(
-                ["git", "clone", self.repo_url, self.repo_abs],
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-            if resultado.returncode == 0:
-                print("[GIT] Repositório clonado com sucesso")
-                return True
-
-            print(f"[GIT] Erro ao clonar: {resultado.stderr.strip()}")
-            return False
-        except Exception as e:
-            print(f"[GIT] Erro ao inicializar repositório: {e}")
-            return False
-
-    def _obter_branch_atual(self):
-        resultado = self._git(["branch", "--show-current"], timeout=10)
-        branch = resultado.stdout.strip()
-        if branch:
-            return branch
-
-        resultado = self._git(["rev-parse", "--abbrev-ref", "HEAD"], timeout=10)
-        branch = resultado.stdout.strip()
-        return branch if branch and branch != "HEAD" else "main"
-
-    def _sincronizar_repo(self):
-        """Atualiza a cópia existente antes de adicionar um novo checklist."""
-        if not self.inicializar_repo():
-            return False
-
-        fetch = self._git(["fetch", "origin"], timeout=60)
-        if fetch.returncode != 0:
-            print(f"[GIT] Falha ao sincronizar (fetch): {fetch.stderr.strip()}")
-            return False
-
-        branch = self._obter_branch_atual()
-        pull = self._git(["pull", "--rebase", "--autostash", "origin", branch], timeout=60)
-        if pull.returncode != 0:
-            print(f"[GIT] Falha ao sincronizar (pull): {pull.stderr.strip()}")
-            return False
-        return True
-
-    def fazer_upload_pdf(self, arquivo_pdf):
-        try:
-            if not os.path.exists(arquivo_pdf):
-                print(f"[GIT] PDF não encontrado: {arquivo_pdf}")
-                return False
-
-            if not self._sincronizar_repo():
-                return False
-
-            pasta_repo = os.path.join(self.repo_abs, 'checklists')
-            os.makedirs(pasta_repo, exist_ok=True)
-            nome_arquivo = os.path.basename(arquivo_pdf)
-            destino = os.path.join(pasta_repo, nome_arquivo)
-            shutil.copy2(os.path.abspath(arquivo_pdf), destino)
-
-            caminho_relativo = os.path.relpath(destino, self.repo_abs)
-            add = self._git(["add", caminho_relativo], timeout=30)
-            if add.returncode != 0:
-                print(f"[GIT] Falha ao preparar PDF: {add.stderr.strip()}")
-                return False
-
-            # Evita commits vazios quando o arquivo já está sincronizado.
-            staged = self._git(["diff", "--cached", "--quiet"], timeout=10)
-            if staged.returncode == 0:
-                print(f"[GIT] PDF já está sincronizado: {nome_arquivo}")
-                return True
-            if staged.returncode != 1:
-                print(f"[GIT] Não foi possível verificar alterações: {staged.stderr.strip()}")
-                return False
-
-            self._git(["config", "user.email", "checklist@gbmx.com"], timeout=10)
-            self._git(["config", "user.name", "Sistema GBMX"], timeout=10)
-
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            commit = self._git(["commit", "-m", f"Checklist {timestamp}"], timeout=30)
-            if commit.returncode != 0:
-                print(f"[GIT] Falha no commit: {commit.stderr.strip()}")
-                return False
-
-            branch = self._obter_branch_atual()
-            push = self._git(["push", "origin", branch], timeout=60)
-            if push.returncode == 0:
-                print(f"[GIT] Upload realizado: {nome_arquivo}")
-                return True
-
-            print(f"[GIT] Falha no push: {push.stderr.strip()}")
-            return False
-        except Exception as e:
-            print(f"[GIT] Erro de upload: {e}")
-            return False
-
-
-# ============================================================================
 # JANELA PRINCIPAL DO SISTEMA GT
 # ============================================================================
 class SistemaGT(QtWidgets.QMainWindow):
@@ -378,7 +232,6 @@ class SistemaGT(QtWidgets.QMainWindow):
         super().__init__()
 
         self.dados = GerenciadorDados()
-        self.git = GerenciadorGitHub()
 
         self.labels_data_hora = []
         self.checklists_aprovados_turno = {}
@@ -390,12 +243,9 @@ class SistemaGT(QtWidgets.QMainWindow):
 
         self.ultimo_uid_lido = None
         self.tempo_ultimo_lido = 0
-        # Depois da autorização mestre, ignora leituras repetidas do mesmo
-        # cartão até que ele seja retirado e outro UID seja apresentado.
         self.uid_bloqueado_ate_novo_cracha = None
 
         self.leitor_rfid = LeituraRC522()
-        # Toda alteração de tela, GPIO e QTimer deve ocorrer na thread Qt.
         self.leitor_rfid.signals.uid_recebido.connect(
             self.processar_rfid,
             type=Qt.QueuedConnection
@@ -407,7 +257,6 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.timer_liberacao.timeout.connect(self.finalizar_tempo_liberacao)
         self.fim_liberacao = None
 
-        # Timer visual independente do timer único de bloqueio.
         self.timer_cronometro = QTimer(self)
         self.timer_cronometro.setInterval(1000)
         self.timer_cronometro.timeout.connect(self.atualizar_cronometro_liberacao)
@@ -634,10 +483,9 @@ class SistemaGT(QtWidgets.QMainWindow):
         QTimer.singleShot(3000, lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
 
     # ========================================================================
-    # CHECKLIST COM FONTES AUMENTADAS
+    # CHECKLIST
     # ========================================================================
     def criar_bloco_pergunta(self, idx_pergunta):
-        """Cria uma pergunta sem caixa de fundo, integrada ao fundo da tela."""
         container = QtWidgets.QWidget()
         container.setAttribute(Qt.WA_TranslucentBackground)
         container.setStyleSheet("background-color: transparent;")
@@ -821,7 +669,6 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.lbl_tempo_restante.setStyleSheet(
             "color: #1B5E20; background-color: #E8F5E9; border-radius: 8px; padding: 10px;")
 
-        # Botão para fechar antecipadamente e voltar ao menu
         btn_voltar_menu = QtWidgets.QPushButton("Voltar ao Menu Principal")
         btn_voltar_menu.setFont(QFont("Arial", 11, QFont.Bold))
         btn_voltar_menu.setFixedHeight(45)
@@ -871,7 +718,6 @@ class SistemaGT(QtWidgets.QMainWindow):
         return tela
 
     def criar_tela_processando_checklist(self):
-        """Tela transitória para impedir que a página final pareça travada."""
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(tela)
         layout.setAlignment(Qt.AlignCenter)
@@ -926,7 +772,6 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.mudar_tela(self.telas_checklist_perguntas[0], "CHK_PAG_0")
 
     def processar_finalizacao_checklist(self):
-        """Conclui a operação na interface e gera o registro em segundo plano."""
         if self.finalizacao_em_andamento:
             return
 
@@ -964,35 +809,17 @@ class SistemaGT(QtWidgets.QMainWindow):
         if hasattr(self, 'btn_concluir_checklist'):
             self.btn_concluir_checklist.setEnabled(False)
 
-        # Aplica liberação / bloqueio na thread principal
         self._aplicar_resultado_checklist(dados_checklist)
 
-        # Gera PDF e envia via Git em segundo plano
+        # Gerar o PDF localmente em segundo plano para não travar a interface
         self.thread_finalizacao = threading.Thread(
-            target=self._gerar_pdf_e_enviar_em_background,
+            target=self._gerar_pdf_em_background,
             args=(dados_checklist,),
             daemon=True
         )
         self.thread_finalizacao.start()
 
-    def finalizar_tempo_liberacao(self):
-        """Desliga os GPIOs, reseta flags e retorna ao menu principal."""
-        self.timer_liberacao.stop()
-        self.timer_cronometro.stop()
-        self.fim_liberacao = None
-        self.finalizacao_em_andamento = False
-
-        if hasattr(self, 'btn_concluir_checklist'):
-            self.btn_concluir_checklist.setEnabled(True)
-
-        if hasattr(self, 'lbl_tempo_restante'):
-            self.lbl_tempo_restante.setText("00:00")
-
-        set_gpios(0)  # Desliga Relé e LED Verde
-        self.mudar_tela(self.tela_liberar_gt, "MENU_GT")
-
     def _aplicar_resultado_checklist(self, dados_checklist):
-        """Atualiza o fluxo do equipamento exclusivamente na thread Qt."""
         if dados_checklist['status'] == "APROVADO":
             turno_atual = self.obter_turno_atual()
             if turno_atual not in self.checklists_aprovados_turno:
@@ -1006,19 +833,16 @@ class SistemaGT(QtWidgets.QMainWindow):
             self.invalidar_checklists_do_turno()
             self.mudar_tela(self.tela_reprovado_bloqueado, "SISTEMA_BLOQUEADO")
 
-    def _gerar_pdf_e_enviar_em_background(self, dados_checklist):
-        """Gera e envia o registro sem tocar em widgets ou timers Qt."""
+    def _gerar_pdf_em_background(self, dados_checklist):
+        """Gera o registro PDF localmente sem travar a interface."""
         try:
             pdf_path = self.gerar_pdf_checklist(dados_checklist)
             if pdf_path:
-                self.git.fazer_upload_pdf(pdf_path)
-            else:
-                print("[CHECKLIST] PDF não foi gerado; liberação já foi aplicada.")
+                print(f"[CHECKLIST] PDF gerado com sucesso: {pdf_path}")
         except Exception as erro:
-            print(f"[CHECKLIST] Erro ao gerar/enviar registro: {erro}")
+            print(f"[CHECKLIST] Erro ao gerar registro PDF: {erro}")
 
     def liberar_equipamento_por_3min(self, matricula, nome):
-        """Aciona os GPIOs e inicia o prazo único usado pelo bloqueio e pela tela."""
         self.timer_liberacao.stop()
         self.timer_cronometro.stop()
         set_gpios(1)
@@ -1030,18 +854,19 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.timer_liberacao.start(TEMPO_LIBERACAO_SEGUNDOS * 1000)
 
     def finalizar_tempo_liberacao(self):
-        """Desliga os GPIOs ao atingir o prazo e retorna ao menu."""
-        if self.fim_liberacao is None and not self.timer_liberacao.isActive():
-            self.timer_cronometro.stop()
-            set_gpios(0)
-            return
-
+        """Desliga os GPIOs, reseta timers e retorna ao menu principal."""
         self.timer_liberacao.stop()
         self.timer_cronometro.stop()
         self.fim_liberacao = None
+        self.finalizacao_em_andamento = False
+
+        if hasattr(self, 'btn_concluir_checklist'):
+            self.btn_concluir_checklist.setEnabled(True)
+
         if hasattr(self, 'lbl_tempo_restante'):
             self.lbl_tempo_restante.setText("00:00:00")
-        set_gpios(0)
+
+        set_gpios(0)  # Desliga Relé e LED Verde
         self.mudar_tela(self.tela_liberar_gt, "MENU_GT")
 
     # ========================================================================
@@ -1052,9 +877,6 @@ class SistemaGT(QtWidgets.QMainWindow):
         agora = time.time()
         uid_clean = str(uid).strip()
 
-        # O RC522 continua lendo o cartão enquanto ele permanece sobre o
-        # leitor. Após aceitar o crachá mestre, não permitir que essa mesma
-        # leitura seja interpretada como o crachá do usuário.
         if self.uid_bloqueado_ate_novo_cracha is not None:
             if uid_clean == self.uid_bloqueado_ate_novo_cracha:
                 return
@@ -1210,7 +1032,6 @@ class SistemaGT(QtWidgets.QMainWindow):
             return None
 
     def keyPressEvent(self, event):
-        """Permite encerrar a aplicação com Alt+F4 mesmo em tela cheia."""
         if event.key() == Qt.Key_F4 and event.modifiers() & Qt.AltModifier:
             self.close()
             event.accept()
