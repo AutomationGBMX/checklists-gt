@@ -3,7 +3,7 @@
 """
 Sistema Completo de Controle de Acesso GBMX e Checklist de Segurança - Liberar GT
 Otimizado para Tela Raspberry Pi de 5 Polegadas (800x480)
-Versão 33 - Interface Visual Aprimorada para Touchscreen (Fontes Ampliadas)
+Versão 33 - Interface Visual Aprimorada para Touchscreen (Checklist Otimizado)
 Com Diagnóstico de Rede Assíncrono e Interface Não-Bloqueante
 """
 
@@ -995,7 +995,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         QTimer.singleShot(3000, lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
 
     # ========================================================================
-    # CHECKLIST (OTIMIZADO COM FONTES DE 16PT EM CARD VISUAL)
+    # CHECKLIST (OTIMIZADO PARA MÁXIMA VISIBILIDADE E LEITURA EM TOUCH)
     # ========================================================================
     def criar_bloco_pergunta(self, idx_pergunta):
         container = QtWidgets.QFrame()
@@ -1006,17 +1006,17 @@ class SistemaGT(QtWidgets.QMainWindow):
                 border-radius: 10px;
             }
         """)
-        container.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+        container.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
 
         layout = QtWidgets.QVBoxLayout(container)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(8)
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(4)
 
-        # Pergunta com fonte ampliada para 16pt em Negrito para máxima legibilidade
+        # Pergunta com fonte ampliada para 16pt Bold, alinhamento à esquerda e quebra em várias linhas
         lbl_p = QtWidgets.QLabel(f"{idx_pergunta + 1}. {self.perguntas[idx_pergunta]}")
         lbl_p.setFont(QFont("Arial", 16, QFont.Bold))
         lbl_p.setWordWrap(True)
-        lbl_p.setAlignment(Qt.AlignCenter)
+        lbl_p.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         lbl_p.setStyleSheet("background-color: transparent; color: #000000; border: none; padding: 0px;")
 
         h_btn = QtWidgets.QHBoxLayout()
@@ -1024,15 +1024,15 @@ class SistemaGT(QtWidgets.QMainWindow):
         h_btn.setAlignment(Qt.AlignCenter)
 
         btn_ok = QtWidgets.QPushButton("OK")
-        btn_ok.setFont(QFont("Arial", 14, QFont.Bold))
-        btn_ok.setFixedSize(160, 44)
+        btn_ok.setFont(QFont("Arial", 15, QFont.Bold))
+        btn_ok.setFixedSize(170, 42)
         btn_ok.setStyleSheet(
             "background-color: #E8F5E9; color: #2E7D32; border: 2px solid #2E7D32; border-radius: 8px;"
         )
 
         btn_nok = QtWidgets.QPushButton("NÃO OK")
-        btn_nok.setFont(QFont("Arial", 14, QFont.Bold))
-        btn_nok.setFixedSize(160, 44)
+        btn_nok.setFont(QFont("Arial", 15, QFont.Bold))
+        btn_nok.setFixedSize(170, 42)
         btn_nok.setStyleSheet(
             "background-color: #FFEBEE; color: #C62828; border: 2px solid #C62828; border-radius: 8px;"
         )
@@ -1043,7 +1043,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         h_btn.addWidget(btn_ok)
         h_btn.addWidget(btn_nok)
 
-        layout.addWidget(lbl_p)
+        layout.addWidget(lbl_p, 1)
         layout.addLayout(h_btn)
         return container
 
@@ -1067,16 +1067,15 @@ class SistemaGT(QtWidgets.QMainWindow):
     def criar_tela_par_perguntas(self, idx1, idx2):
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(tela)
-        layout.setContentsMargins(10, 4, 10, 4)
-        layout.setSpacing(6)
-        layout.setAlignment(Qt.AlignCenter)
+        layout.setContentsMargins(8, 2, 8, 4)
+        layout.setSpacing(4)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
         header = QtWidgets.QLabel("CHECKLIST DE SEGURANÇA")
-        header.setFont(QFont("Arial", 13, QFont.Bold))
+        header.setFont(QFont("Arial", 12, QFont.Bold))
         header.setAlignment(Qt.AlignCenter)
-        header.setStyleSheet("color: #1A237E; background-color: transparent;")
+        header.setStyleSheet("color: #1A237E; background-color: transparent; margin: 0px; padding: 0px;")
 
         bloco1 = self.criar_bloco_pergunta(idx1)
         bloco2 = self.criar_bloco_pergunta(idx2)
@@ -1090,7 +1089,7 @@ class SistemaGT(QtWidgets.QMainWindow):
                 color: white;
                 border-radius: 8px;
                 font-weight: bold;
-                font-size: 13pt;
+                font-size: 14pt;
             }}
             QPushButton:pressed {{
                 background-color: {cor_press};
@@ -1116,26 +1115,25 @@ class SistemaGT(QtWidgets.QMainWindow):
         botoes_nav.addWidget(btn_voltar)
         botoes_nav.addWidget(btn_proximo)
 
-        layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
-        layout.addWidget(header, alignment=Qt.AlignCenter)
-        layout.addWidget(bloco1)
-        layout.addWidget(bloco2)
+        layout.addWidget(lbl_hdr)
+        layout.addWidget(header)
+        layout.addWidget(bloco1, 1)
+        layout.addWidget(bloco2, 1)
         layout.addLayout(botoes_nav)
         return tela
 
     def criar_tela_pergunta_final(self, idx_pergunta):
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(tela)
-        layout.setContentsMargins(10, 4, 10, 4)
-        layout.setSpacing(8)
-        layout.setAlignment(Qt.AlignCenter)
+        layout.setContentsMargins(8, 2, 8, 4)
+        layout.setSpacing(4)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
         header = QtWidgets.QLabel("CHECKLIST DE SEGURANÇA - FINALIZAÇÃO")
-        header.setFont(QFont("Arial", 13, QFont.Bold))
+        header.setFont(QFont("Arial", 12, QFont.Bold))
         header.setAlignment(Qt.AlignCenter)
-        header.setStyleSheet("color: #1A237E; background-color: transparent;")
+        header.setStyleSheet("color: #1A237E; background-color: transparent; margin: 0px; padding: 0px;")
 
         bloco1 = self.criar_bloco_pergunta(idx_pergunta)
 
@@ -1148,7 +1146,7 @@ class SistemaGT(QtWidgets.QMainWindow):
                 color: white;
                 border-radius: 8px;
                 font-weight: bold;
-                font-size: 13pt;
+                font-size: 14pt;
             }}
             QPushButton:pressed {{
                 background-color: {cor_press};
@@ -1169,11 +1167,9 @@ class SistemaGT(QtWidgets.QMainWindow):
         botoes_nav.addWidget(btn_voltar)
         botoes_nav.addWidget(btn_concluir)
 
-        layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
-        layout.addWidget(header, alignment=Qt.AlignCenter)
-        layout.addStretch(1)
-        layout.addWidget(bloco1)
-        layout.addStretch(1)
+        layout.addWidget(lbl_hdr)
+        layout.addWidget(header)
+        layout.addWidget(bloco1, 1)
         layout.addLayout(botoes_nav)
         return tela
 
