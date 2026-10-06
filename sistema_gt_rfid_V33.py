@@ -3,7 +3,8 @@
 """
 Sistema Completo de Controle de Acesso GBMX e Checklist de Segurança - Liberar GT
 Otimizado para Tela Raspberry Pi de 5 Polegadas (800x480)
-Versão 35 - Operação Local + Validação Wi-Fi / Hotspot + Git Sync via Crachá Mestre
+Versão 35.1 - Operação Local + Validação Wi-Fi / Hotspot + Git Sync via Crachá Mestre
+Com Diagnóstico de Rede Assíncrono e Interface Não-Bloqueante
 """
 
 import sys
@@ -58,8 +59,8 @@ def set_gpios(estado: int):
             print(f"[GPIO] Erro ao acionar GPIOs: {e}")
 
 
-def testar_conexao_internet(host="8.8.8.8", port=53, timeout=2):
-    """Verifica se há conexão ativa com a internet"""
+def testar_conexao_internet(host="8.8.8.8", port=53, timeout=3):
+    """Verifica se há conexão ativa com a internet utilizando timeout curto"""
     try:
         socket.setdefaulttimeout(timeout)
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -68,6 +69,25 @@ def testar_conexao_internet(host="8.8.8.8", port=53, timeout=2):
         return True
     except Exception:
         return False
+
+
+def obter_wifi_ssid():
+    """Obtém o SSID do Wi-Fi atualmente conectado no Raspberry Pi OS."""
+    try:
+        # Método 1: via iwgetid
+        result = subprocess.run(['iwgetid', '-r'], capture_output=True, text=True, timeout=2)
+        ssid = result.stdout.strip()
+        if ssid:
+            return ssid
+
+        # Método 2: via nmcli
+        result = subprocess.run(['nmcli', '-t', '-f', 'active,ssid', 'dev', 'wifi'], capture_output=True, text=True, timeout=2)
+        for line in result.stdout.splitlines():
+            if line.startswith('yes:'):
+                return line.split('yes:')[1]
+    except Exception:
+        pass
+    return None
 
 
 def conectar_wifi_nmcli(ssid, senha):
@@ -115,7 +135,6 @@ class TecladoVirtual(QtWidgets.QWidget):
         self.renderizar_teclado()
 
     def renderizar_teclado(self):
-        # Limpar layout anterior se houver
         while self.layout_principal.count():
             item = self.layout_principal.takeAt(0)
             if item.widget():
@@ -355,6 +374,7 @@ class GerenciadorDados:
 class SistemaGT(QtWidgets.QMainWindow):
     sinal_git_finalizado = pyqtSignal(bool, str)
     sinal_wifi_finalizado = pyqtSignal(bool, str)
+    sinal_diagnostico_rede = pyqtSignal(bool, bool, str)  # (tem_wifi, tem_internet, ssid)
 
     def __init__(self):
         super().__init__()
@@ -376,6 +396,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         # Conectar sinais
         self.sinal_git_finalizado.connect(self.ao_concluir_sincronizacao_git)
         self.sinal_wifi_finalizado.connect(self.ao_concluir_conexao_wifi)
+        self.sinal_diagnostico_rede.connect(self.ao_concluir_diagnostico_rede)
 
         self.leitor_rfid = LeituraRC522()
         self.leitor_rfid.signals.uid_recebido.connect(
@@ -485,6 +506,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.tela_liberar_gt = self.criar_tela_menu_liberar_gt()
         self.tela_leitura = self.criar_tela_leitura()
         self.tela_wifi = self.criar_tela_wifi()
+        self.tela_status_rede = self.criar_tela_status_rede()
 
         self.telas_checklist_perguntas = [
             self.criar_tela_par_perguntas(0, 1),
@@ -503,6 +525,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.central_widget.addWidget(self.tela_liberar_gt)
         self.central_widget.addWidget(self.tela_leitura)
         self.central_widget.addWidget(self.tela_wifi)
+        self.central_widget.addWidget(self.tela_status_rede)
         for t in self.telas_checklist_perguntas:
             self.central_widget.addWidget(t)
         self.central_widget.addWidget(self.tela_aprovado)
@@ -574,28 +597,112 @@ class SistemaGT(QtWidgets.QMainWindow):
         return tela
 
     # ========================================================================
-    # FLUXO DA OPÇÃO 4: SINCRONIZAR GIT + WI-FI
+    # TELA E FLUXO DA OPÇÃO 4: DIAGNÓSTICO DE REDE E SINCRONIZAR GIT
     # ========================================================================
+    def criar_tela_status_rede(self):
+        tela = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(tela)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setContentsMargins(15, 10, 15, 10)
+        layout.setSpacing(10)
+
+        lbl_hdr = self.criar_widget_cabecalho()
+
+        titulo = QtWidgets.QLabel("DIAGNÓSTICO DE REDE E INTERNET")
+        titulo.setFont(QFont("Arial", 16, QFont.Bold))
+        titulo.setAlignment(Qt.AlignCenter)
+        titulo.setStyleSheet("color: #1A237E;")
+
+        self.lbl_status_rede_detalhe = QtWidgets.QLabel("Verificando conexão com a internet...")
+        self.lbl_status_rede_detalhe.setFont(QFont("Arial", 12, QFont.Bold))
+        self.lbl_status_rede_detalhe.setAlignment(Qt.AlignCenter)
+        self.lbl_status_rede_detalhe.setWordWrap(True)
+        self.lbl_status_rede_detalhe.setStyleSheet(
+            "color: #1565C0; padding: 15px; border: 2px solid #1565C0; border-radius: 8px; background-color: #E3F2FD;"
+        )
+        self.lbl_status_rede_detalhe.setFixedSize(600, 150)
+
+        # Container dos Botões de Ação
+        self.container_btn_rede = QtWidgets.QWidget()
+        h_btn = QtWidgets.QHBoxLayout(self.container_btn_rede)
+        h_btn.setSpacing(10)
+
+        self.btn_voltar_rede = QtWidgets.QPushButton("VOLTAR AO MENU")
+        self.btn_voltar_rede.setFont(QFont("Arial", 11, QFont.Bold))
+        self.btn_voltar_rede.setFixedHeight(42)
+        self.btn_voltar_rede.setStyleSheet("background-color: #757575; color: white; border-radius: 6px;")
+        self.btn_voltar_rede.clicked.connect(lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
+
+        self.btn_ir_wifi = QtWidgets.QPushButton("CONFIGURAR WI-FI")
+        self.btn_ir_wifi.setFont(QFont("Arial", 11, QFont.Bold))
+        self.btn_ir_wifi.setFixedHeight(42)
+        self.btn_ir_wifi.setStyleSheet("background-color: #E65100; color: white; border-radius: 6px;")
+        self.btn_ir_wifi.clicked.connect(lambda: self.mudar_tela(self.tela_wifi, "CONFIGURAR_WIFI"))
+
+        self.btn_tentar_rede = QtWidgets.QPushButton("TENTAR NOVAMENTE")
+        self.btn_tentar_rede.setFont(QFont("Arial", 11, QFont.Bold))
+        self.btn_tentar_rede.setFixedHeight(42)
+        self.btn_tentar_rede.setStyleSheet("background-color: #1565C0; color: white; border-radius: 6px;")
+        self.btn_tentar_rede.clicked.connect(self.ao_clicar_opcao_git)
+
+        h_btn.addWidget(self.btn_voltar_rede)
+        h_btn.addWidget(self.btn_ir_wifi)
+        h_btn.addWidget(self.btn_tentar_rede)
+
+        layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
+        layout.addWidget(titulo, alignment=Qt.AlignCenter)
+        layout.addWidget(self.lbl_status_rede_detalhe, alignment=Qt.AlignCenter)
+        layout.addWidget(self.container_btn_rede, alignment=Qt.AlignCenter)
+
+        tela.setLayout(layout)
+        return tela
+
     def ao_clicar_opcao_git(self):
-        """Verifica se há conexão. Se houver, solicita Mestre. Se não, abre Wi-Fi."""
-        self.mostrar_confirmacao_operacao("Verificando conexão com a internet...", "#1565C0")
+        """Inicia a verificação de rede assíncrona sem travar a interface."""
+        self.mudar_tela(self.tela_status_rede, "DIAGNOSTICO_REDE")
+        self.lbl_status_rede_detalhe.setText("Verificando conexão com a rede e internet...\nAguarde...")
+        self.lbl_status_rede_detalhe.setStyleSheet(
+            "color: #1565C0; padding: 15px; border: 2px solid #1565C0; border-radius: 8px; background-color: #E3F2FD;"
+        )
+        self.container_btn_rede.setEnabled(False)
 
-        def _verificar():
-            tem_internet = testar_conexao_internet()
-            QTimer.singleShot(0, lambda: self._pos_verificacao_internet(tem_internet))
+        def _worker_diagnostico():
+            ssid = obter_wifi_ssid()
+            tem_wifi = bool(ssid)
+            tem_internet = testar_conexao_internet(timeout=3) if tem_wifi else False
+            self.sinal_diagnostico_rede.emit(tem_wifi, tem_internet, ssid or "")
 
-        threading.Thread(target=_verificar, daemon=True).start()
+        threading.Thread(target=_worker_diagnostico, daemon=True).start()
 
-    def _pos_verificacao_internet(self, tem_internet):
-        if tem_internet:
-            self.preparar_leitura(
-                "SINCRONIZAR_GIT_MESTRE",
-                "Conexão OK!\nAproxime o CRACHÁ MESTRE para autorizar a Sincronização"
-            )
-        else:
-            self.lbl_wifi_status.setText("Sem conexão com a internet.\nInforme os dados da rede/hotspot:")
+    @pyqtSlot(bool, bool, str)
+    def ao_concluir_diagnostico_rede(self, tem_wifi, tem_internet, ssid):
+        self.container_btn_rede.setEnabled(True)
+
+        # CASO 1: Não está conectado ao Wi-Fi
+        if not tem_wifi:
+            self.lbl_wifi_status.setText("Nenhuma rede Wi-Fi conectada.\nInforme os dados da rede/hotspot:")
             self.lbl_wifi_status.setStyleSheet("color: #C62828; font-weight: bold; font-size: 13px;")
             self.mudar_tela(self.tela_wifi, "CONFIGURAR_WIFI")
+            return
+
+        # CASO 2: Conectado ao Wi-Fi E tem Internet
+        if tem_wifi and tem_internet:
+            self.preparar_leitura(
+                "SINCRONIZAR_GIT_MESTRE",
+                f"Conectado à rede: {ssid}\n\nAproxime o CRACHÁ MESTRE para autorizar a Sincronização"
+            )
+        else:
+            # CASO 3: Conectado ao Wi-Fi, mas SEM Internet
+            msg_detalhe = (
+                f"REDE WI-FI: {ssid}\n"
+                f"STATUS DA CONEXÃO: Conectado ao Roteador/Hotspot\n"
+                f"ACESSO À INTERNET: Sem Acesso\n\n"
+                f"Verifique se o roteador/hotspot possui conexão com a internet e tente novamente."
+            )
+            self.lbl_status_rede_detalhe.setText(msg_detalhe)
+            self.lbl_status_rede_detalhe.setStyleSheet(
+                "color: #C62828; padding: 15px; border: 2px solid #C62828; border-radius: 8px; background-color: #FFEBEE;"
+            )
 
     def criar_tela_wifi(self):
         tela = QtWidgets.QWidget()
@@ -631,7 +738,6 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.input_senha.setFixedHeight(32)
         self.input_senha.setStyleSheet("background-color: white; border: 1px solid #777; border-radius: 4px; padding: 2px 5px;")
 
-        # Eventos de foco para definir o destino do teclado virtual
         self.input_ssid.mousePressEvent = lambda e: self.definir_foco_campo(self.input_ssid)
         self.input_senha.mousePressEvent = lambda e: self.definir_foco_campo(self.input_senha)
 
@@ -670,7 +776,6 @@ class SistemaGT(QtWidgets.QMainWindow):
         layout.addWidget(self.teclado)
         layout.addLayout(btn_layout)
 
-        # Campo padrão focado inicialmente
         self.definir_foco_campo(self.input_ssid)
 
         tela.setLayout(layout)
@@ -709,11 +814,10 @@ class SistemaGT(QtWidgets.QMainWindow):
         def _worker_wifi():
             sucesso, msg = conectar_wifi_nmcli(ssid, senha)
             if sucesso:
-                # Validar se realmente ganhou internet
                 if testar_conexao_internet(timeout=4):
-                    self.sinal_wifi_finalizado.emit(True, "Conectado e Internet Validada com Sucesso!")
+                    self.sinal_wifi_finalizado.emit(True, f"Conectado à rede {ssid} com sucesso!")
                 else:
-                    self.sinal_wifi_finalizado.emit(False, "Wi-Fi Conectado, mas Sem Acesso à Internet.")
+                    self.sinal_wifi_finalizado.emit(False, f"Conectado ao Wi-Fi ({ssid}), mas sem acesso à internet.")
             else:
                 self.sinal_wifi_finalizado.emit(False, msg)
 
@@ -723,16 +827,22 @@ class SistemaGT(QtWidgets.QMainWindow):
     def ao_concluir_conexao_wifi(self, sucesso, mensagem):
         self.btn_conectar_wifi.setEnabled(True)
         if sucesso:
+            ssid_atual = self.input_ssid.text().strip()
             self.preparar_leitura(
                 "SINCRONIZAR_GIT_MESTRE",
-                "Conexão Estabelecida!\nAproxime o CRACHÁ MESTRE para autorizar a Sincronização"
+                f"Conectado à rede: {ssid_atual}\n\nAproxime o CRACHÁ MESTRE para autorizar a Sincronização"
             )
         else:
             self.lbl_wifi_status.setText(f"Falha: {mensagem}\nTente novamente ou volte ao menu.")
             self.lbl_wifi_status.setStyleSheet("color: #C62828; font-weight: bold;")
 
     def iniciar_sincronizacao_git(self):
-        self.mostrar_confirmacao_operacao("Sincronizando com o Git...\nAguarde...", "#1565C0")
+        self.mudar_tela(self.tela_status_rede, "SINCRONIZANDO_GIT")
+        self.lbl_status_rede_detalhe.setText("Sincronizando checklists com o Git...\nAguarde envio dos arquivos...")
+        self.lbl_status_rede_detalhe.setStyleSheet(
+            "color: #1565C0; padding: 15px; border: 2px solid #1565C0; border-radius: 8px; background-color: #E3F2FD;"
+        )
+        self.container_btn_rede.setEnabled(False)
         threading.Thread(target=self._worker_sincronizar_git, daemon=True).start()
 
     def _worker_sincronizar_git(self):
@@ -740,14 +850,14 @@ class SistemaGT(QtWidgets.QMainWindow):
             os.makedirs(PASTA_CHECKLISTS, exist_ok=True)
 
             # 1. Adicionar PDFs e planilha alterada ao git
-            subprocess.run(["git", "add", "checklists/.", "Lista_Basedecrachás.xlsx"], check=True, capture_output=True, text=True)
+            subprocess.run(["git", "add", "checklists/.", "Lista_Basedecrachás.xlsx"], check=True, capture_output=True, text=True, timeout=10)
 
             # 2. Criar commit
             msg_commit = f"Sincronização manual - {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
-            res_commit = subprocess.run(["git", "commit", "-m", msg_commit], capture_output=True, text=True)
+            res_commit = subprocess.run(["git", "commit", "-m", msg_commit], capture_output=True, text=True, timeout=10)
 
             # 3. Fazer o Push para o repositório remoto
-            res_push = subprocess.run(["git", "push"], capture_output=True, text=True)
+            res_push = subprocess.run(["git", "push"], capture_output=True, text=True, timeout=20)
 
             if res_push.returncode == 0:
                 if "nothing to commit" in res_commit.stdout or "nothing to commit" in res_commit.stderr:
@@ -755,18 +865,31 @@ class SistemaGT(QtWidgets.QMainWindow):
                 else:
                     self.sinal_git_finalizado.emit(True, "Checklists e Dados Enviados ao Git com Sucesso!")
             else:
-                self.sinal_git_finalizado.emit(False, f"Erro no Git Push:\n{res_push.stderr[:100]}")
+                self.sinal_git_finalizado.emit(False, f"Erro no Git Push:\n{res_push.stderr[:120]}")
 
+        except subprocess.TimeoutExpired:
+            self.sinal_git_finalizado.emit(False, "Tempo limite excedido na conexão com o servidor Git.")
         except subprocess.CalledProcessError as e:
             err_msg = e.stderr if e.stderr else str(e)
-            self.sinal_git_finalizado.emit(False, f"Falha no Git:\n{err_msg[:100]}")
+            self.sinal_git_finalizado.emit(False, f"Falha no Git:\n{err_msg[:120]}")
         except Exception as e:
-            self.sinal_git_finalizado.emit(False, f"Erro inesperado:\n{str(e)[:100]}")
+            self.sinal_git_finalizado.emit(False, f"Erro inesperado:\n{str(e)[:120]}")
 
     @pyqtSlot(bool, str)
     def ao_concluir_sincronizacao_git(self, sucesso, mensagem):
-        cor_fundo = "#2E7D32" if sucesso else "#C62828"
-        self.mostrar_confirmacao_operacao(mensagem, cor_fundo)
+        self.container_btn_rede.setEnabled(True)
+
+        if sucesso:
+            self.lbl_status_rede_detalhe.setText(f"SINCRONIZAÇÃO CONCLUÍDA!\n\n{mensagem}")
+            self.lbl_status_rede_detalhe.setStyleSheet(
+                "color: #1B5E20; padding: 15px; border: 2px solid #2E7D32; border-radius: 8px; background-color: #E8F5E9;"
+            )
+            QTimer.singleShot(4000, lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
+        else:
+            self.lbl_status_rede_detalhe.setText(f"FALHA NA SINCRONIZAÇÃO GIT\n\n{mensagem}")
+            self.lbl_status_rede_detalhe.setStyleSheet(
+                "color: #C62828; padding: 15px; border: 2px solid #C62828; border-radius: 8px; background-color: #FFEBEE;"
+            )
 
     # ========================================================================
     # TELA DE LEITURA RFID
