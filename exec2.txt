@@ -1,2 +1,0 @@
-ls -l /home/alex/checklist_gt/sistema_gt_rfid_V33.py
-ls -l /home/alex/checklist_gt/iniciar_sistema_gt.sh

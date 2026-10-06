@@ -1,3 +1,0 @@
-cd /home/alex/checklist_gt
-python3 -m py_compile sistema_gt_rfid_V33.py
-./iniciar_sistema_gt.sh
