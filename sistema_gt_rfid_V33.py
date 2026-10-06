@@ -3,13 +3,15 @@
 """
 Sistema Completo de Controle de Acesso GBMX e Checklist de Segurança - Liberar GT
 Otimizado para Tela Raspberry Pi de 5 Polegadas (800x480)
-Versão 33 - Sem Integração Git (Operação 100% Local)
+Versão 35 - Operação Local + Validação Wi-Fi / Hotspot + Git Sync via Crachá Mestre
 """
 
 import sys
 import os
+import socket
 import threading
 import time
+import subprocess
 import pandas as pd
 from datetime import datetime, timedelta
 
@@ -54,6 +56,129 @@ def set_gpios(estado: int):
             print(f"[GPIO] Saídas 23 e 24 alteradas para: {estado}")
         except Exception as e:
             print(f"[GPIO] Erro ao acionar GPIOs: {e}")
+
+
+def testar_conexao_internet(host="8.8.8.8", port=53, timeout=2):
+    """Verifica se há conexão ativa com a internet"""
+    try:
+        socket.setdefaulttimeout(timeout)
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect((host, port))
+        s.close()
+        return True
+    except Exception:
+        return False
+
+
+def conectar_wifi_nmcli(ssid, senha):
+    """Tenta conectar à rede Wi-Fi/Hotspot via nmcli no Linux/Raspberry Pi"""
+    try:
+        subprocess.run(["nmcli", "radio", "wifi", "on"], capture_output=True, timeout=5)
+        cmd = ["nmcli", "dev", "wifi", "connect", ssid, "password", senha]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        if res.returncode == 0 or "successfully activated" in res.stdout.lower():
+            return True, "Conectado com sucesso!"
+        else:
+            msg_erro = res.stderr.strip() if res.stderr.strip() else res.stdout.strip()
+            return False, f"Falha na conexão: {msg_erro[:60]}"
+    except subprocess.TimeoutExpired:
+        return False, "Tempo limite esgotado ao conectar ao Wi-Fi."
+    except Exception as e:
+        return False, f"Erro ao conectar: {str(e)[:60]}"
+
+
+# ============================================================================
+# TECLADO VIRTUAL TOUCH (PARA TELA DE 5 POLEGADAS 800x480)
+# ============================================================================
+class TecladoVirtual(QtWidgets.QWidget):
+    tecla_pressionada = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.maiusculo = True
+        self.configurar_layout()
+
+    def configurar_layout(self):
+        self.layout_principal = QtWidgets.QVBoxLayout(self)
+        self.layout_principal.setContentsMargins(2, 2, 2, 2)
+        self.layout_principal.setSpacing(3)
+
+        self.linhas_teclas = [
+            ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '⌫'],
+            ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+            ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', '-'],
+            ['z', 'x', 'c', 'v', 'b', 'n', 'm', '.', '_', '@'],
+            ['a/A', 'ESPAÇO', 'LIMPAR']
+        ]
+
+        self.botoes = []
+        self.renderizar_teclado()
+
+    def renderizar_teclado(self):
+        # Limpar layout anterior se houver
+        while self.layout_principal.count():
+            item = self.layout_principal.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+            elif item.layout():
+                while item.layout().count():
+                    sub = item.layout().takeAt(0)
+                    if sub.widget():
+                        sub.widget().deleteLater()
+
+        self.botoes.clear()
+
+        style_tecla = """
+            QPushButton {
+                background-color: #E0E0E0;
+                color: #111;
+                font-weight: bold;
+                font-size: 13px;
+                border: 1px solid #BDBDBD;
+                border-radius: 4px;
+            }
+            QPushButton:pressed {
+                background-color: #1565C0;
+                color: white;
+            }
+        """
+
+        for linha in self.linhas_teclas:
+            h_layout = QtWidgets.QHBoxLayout()
+            h_layout.setSpacing(3)
+            for k in linha:
+                btn_txt = k
+                if len(k) == 1 and k.isalpha():
+                    btn_txt = k.upper() if self.maiusculo else k.lower()
+
+                btn = QtWidgets.QPushButton(btn_txt)
+                btn.setFixedHeight(34)
+                btn.setStyleSheet(style_tecla)
+
+                if k in ['⌫', 'LIMPAR', 'a/A']:
+                    btn.setStyleSheet(style_tecla + "background-color: #CFD8DC;")
+                elif k == 'ESPAÇO':
+                    btn.setMinimumWidth(180)
+
+                btn.clicked.connect(lambda checked, val=k: self.tratar_clique(val))
+                h_layout.addWidget(btn)
+                self.botoes.append(btn)
+
+            self.layout_principal.addLayout(h_layout)
+
+    def tratar_clique(self, tecla):
+        if tecla == 'a/A':
+            self.maiusculo = not self.maiusculo
+            self.renderizar_teclado()
+        elif tecla == '⌫':
+            self.tecla_pressionada.emit("BACKSPACE")
+        elif tecla == 'LIMPAR':
+            self.tecla_pressionada.emit("CLEAR")
+        elif tecla == 'ESPAÇO':
+            self.tecla_pressionada.emit(" ")
+        else:
+            val = tecla.upper() if (len(tecla) == 1 and tecla.isalpha() and self.maiusculo) else tecla
+            self.tecla_pressionada.emit(val)
 
 
 # ============================================================================
@@ -228,6 +353,9 @@ class GerenciadorDados:
 # JANELA PRINCIPAL DO SISTEMA GT
 # ============================================================================
 class SistemaGT(QtWidgets.QMainWindow):
+    sinal_git_finalizado = pyqtSignal(bool, str)
+    sinal_wifi_finalizado = pyqtSignal(bool, str)
+
     def __init__(self):
         super().__init__()
 
@@ -244,6 +372,10 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.ultimo_uid_lido = None
         self.tempo_ultimo_lido = 0
         self.uid_bloqueado_ate_novo_cracha = None
+
+        # Conectar sinais
+        self.sinal_git_finalizado.connect(self.ao_concluir_sincronizacao_git)
+        self.sinal_wifi_finalizado.connect(self.ao_concluir_conexao_wifi)
 
         self.leitor_rfid = LeituraRC522()
         self.leitor_rfid.signals.uid_recebido.connect(
@@ -279,6 +411,7 @@ class SistemaGT(QtWidgets.QMainWindow):
             "Após a verificação dos itens acima, a operação do guincho tracionador pode ser realizada com segurança?"
         ]
 
+        self.campo_focado_wifi = None
         self.configurar_interface()
         self.atualizar_relogio()
 
@@ -323,7 +456,6 @@ class SistemaGT(QtWidgets.QMainWindow):
             lbl.setText(texto)
 
     def atualizar_cronometro_liberacao(self):
-        """Exibe o tempo restante calculado a partir do prazo real de bloqueio."""
         if self.fim_liberacao is None:
             return
 
@@ -352,6 +484,7 @@ class SistemaGT(QtWidgets.QMainWindow):
 
         self.tela_liberar_gt = self.criar_tela_menu_liberar_gt()
         self.tela_leitura = self.criar_tela_leitura()
+        self.tela_wifi = self.criar_tela_wifi()
 
         self.telas_checklist_perguntas = [
             self.criar_tela_par_perguntas(0, 1),
@@ -369,6 +502,7 @@ class SistemaGT(QtWidgets.QMainWindow):
 
         self.central_widget.addWidget(self.tela_liberar_gt)
         self.central_widget.addWidget(self.tela_leitura)
+        self.central_widget.addWidget(self.tela_wifi)
         for t in self.telas_checklist_perguntas:
             self.central_widget.addWidget(t)
         self.central_widget.addWidget(self.tela_aprovado)
@@ -392,45 +526,247 @@ class SistemaGT(QtWidgets.QMainWindow):
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout()
         layout.setAlignment(Qt.AlignCenter)
-        layout.setContentsMargins(15, 10, 15, 10)
-        layout.setSpacing(12)
+        layout.setContentsMargins(15, 8, 15, 8)
+        layout.setSpacing(8)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
         titulo = QtWidgets.QLabel("MENU - LIBERAR GT")
-        titulo.setFont(QFont("Arial", 20, QFont.Bold))
+        titulo.setFont(QFont("Arial", 18, QFont.Bold))
         titulo.setAlignment(Qt.AlignCenter)
-        titulo.setStyleSheet("color: #212121; margin-top: 2px; margin-bottom: 5px;")
+        titulo.setStyleSheet("color: #212121; margin-top: 2px; margin-bottom: 2px;")
 
         btn_liberar = QtWidgets.QPushButton("1 - LIBERAR EQUIPAMENTO")
-        btn_liberar.setFont(QFont("Arial", 14, QFont.Bold))
-        btn_liberar.setFixedSize(460, 55)
+        btn_liberar.setFont(QFont("Arial", 13, QFont.Bold))
+        btn_liberar.setFixedSize(480, 48)
         btn_liberar.setStyleSheet("background-color: #2E7D32; color: white; border-radius: 8px;")
         btn_liberar.clicked.connect(
             lambda: self.preparar_leitura("LIBERAR_EQUIPAMENTO", "Aproxime o crachá para LIBERAR O EQUIPAMENTO"))
 
         btn_habilitar = QtWidgets.QPushButton("2 - HABILITAR USUÁRIO")
-        btn_habilitar.setFont(QFont("Arial", 14, QFont.Bold))
-        btn_habilitar.setFixedSize(460, 55)
+        btn_habilitar.setFont(QFont("Arial", 13, QFont.Bold))
+        btn_habilitar.setFixedSize(480, 48)
         btn_habilitar.setStyleSheet("background-color: #1565C0; color: white; border-radius: 8px;")
         btn_habilitar.clicked.connect(
             lambda: self.preparar_leitura("HABILITAR_USUARIO_MESTRE", "Aproxime o CRACHÁ MESTRE para autorizar"))
 
         btn_desabilitar = QtWidgets.QPushButton("3 - DESABILITAR USUÁRIO")
-        btn_desabilitar.setFont(QFont("Arial", 14, QFont.Bold))
-        btn_desabilitar.setFixedSize(460, 55)
+        btn_desabilitar.setFont(QFont("Arial", 13, QFont.Bold))
+        btn_desabilitar.setFixedSize(480, 48)
         btn_desabilitar.setStyleSheet("background-color: #C62828; color: white; border-radius: 8px;")
         btn_desabilitar.clicked.connect(
             lambda: self.preparar_leitura("DESABILITAR_USUARIO_MESTRE", "Aproxime o CRACHÁ MESTRE para autorizar"))
+
+        btn_git = QtWidgets.QPushButton("4 - SINCRONIZAR CHECKLISTS (GIT)")
+        btn_git.setFont(QFont("Arial", 13, QFont.Bold))
+        btn_git.setFixedSize(480, 48)
+        btn_git.setStyleSheet("background-color: #E65100; color: white; border-radius: 8px;")
+        btn_git.clicked.connect(self.ao_clicar_opcao_git)
 
         layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
         layout.addWidget(titulo, alignment=Qt.AlignCenter)
         layout.addWidget(btn_liberar, alignment=Qt.AlignCenter)
         layout.addWidget(btn_habilitar, alignment=Qt.AlignCenter)
         layout.addWidget(btn_desabilitar, alignment=Qt.AlignCenter)
+        layout.addWidget(btn_git, alignment=Qt.AlignCenter)
 
         tela.setLayout(layout)
         return tela
+
+    # ========================================================================
+    # FLUXO DA OPÇÃO 4: SINCRONIZAR GIT + WI-FI
+    # ========================================================================
+    def ao_clicar_opcao_git(self):
+        """Verifica se há conexão. Se houver, solicita Mestre. Se não, abre Wi-Fi."""
+        self.mostrar_confirmacao_operacao("Verificando conexão com a internet...", "#1565C0")
+
+        def _verificar():
+            tem_internet = testar_conexao_internet()
+            QTimer.singleShot(0, lambda: self._pos_verificacao_internet(tem_internet))
+
+        threading.Thread(target=_verificar, daemon=True).start()
+
+    def _pos_verificacao_internet(self, tem_internet):
+        if tem_internet:
+            self.preparar_leitura(
+                "SINCRONIZAR_GIT_MESTRE",
+                "Conexão OK!\nAproxime o CRACHÁ MESTRE para autorizar a Sincronização"
+            )
+        else:
+            self.lbl_wifi_status.setText("Sem conexão com a internet.\nInforme os dados da rede/hotspot:")
+            self.lbl_wifi_status.setStyleSheet("color: #C62828; font-weight: bold; font-size: 13px;")
+            self.mudar_tela(self.tela_wifi, "CONFIGURAR_WIFI")
+
+    def criar_tela_wifi(self):
+        tela = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(tela)
+        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setSpacing(4)
+
+        lbl_hdr = self.criar_widget_cabecalho()
+
+        titulo = QtWidgets.QLabel("CONFIGURAÇÃO DE WI-FI / HOTSPOT")
+        titulo.setFont(QFont("Arial", 14, QFont.Bold))
+        titulo.setAlignment(Qt.AlignCenter)
+        titulo.setStyleSheet("color: #1A237E;")
+
+        self.lbl_wifi_status = QtWidgets.QLabel("Informe o SSID e a Senha para conectar:")
+        self.lbl_wifi_status.setFont(QFont("Arial", 11))
+        self.lbl_wifi_status.setAlignment(Qt.AlignCenter)
+
+        # Campos de texto
+        form_layout = QtWidgets.QHBoxLayout()
+        form_layout.setSpacing(10)
+
+        lbl_ssid = QtWidgets.QLabel("Rede (SSID):")
+        lbl_ssid.setFont(QFont("Arial", 11, QFont.Bold))
+        self.input_ssid = QtWidgets.QLineEdit()
+        self.input_ssid.setFixedHeight(32)
+        self.input_ssid.setStyleSheet("background-color: white; border: 1px solid #777; border-radius: 4px; padding: 2px 5px;")
+
+        lbl_senha = QtWidgets.QLabel("Senha:")
+        lbl_senha.setFont(QFont("Arial", 11, QFont.Bold))
+        self.input_senha = QtWidgets.QLineEdit()
+        self.input_senha.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.input_senha.setFixedHeight(32)
+        self.input_senha.setStyleSheet("background-color: white; border: 1px solid #777; border-radius: 4px; padding: 2px 5px;")
+
+        # Eventos de foco para definir o destino do teclado virtual
+        self.input_ssid.mousePressEvent = lambda e: self.definir_foco_campo(self.input_ssid)
+        self.input_senha.mousePressEvent = lambda e: self.definir_foco_campo(self.input_senha)
+
+        form_layout.addWidget(lbl_ssid)
+        form_layout.addWidget(self.input_ssid, 1)
+        form_layout.addWidget(lbl_senha)
+        form_layout.addWidget(self.input_senha, 1)
+
+        # Teclado Virtual
+        self.teclado = TecladoVirtual()
+        self.teclado.tecla_pressionada.connect(self.ao_digitar_teclado)
+
+        # Botoes
+        btn_layout = QtWidgets.QHBoxLayout()
+        btn_layout.setSpacing(10)
+
+        self.btn_conectar_wifi = QtWidgets.QPushButton("CONECTAR E CONTINUAR")
+        self.btn_conectar_wifi.setFont(QFont("Arial", 12, QFont.Bold))
+        self.btn_conectar_wifi.setFixedHeight(40)
+        self.btn_conectar_wifi.setStyleSheet("background-color: #2E7D32; color: white; border-radius: 6px;")
+        self.btn_conectar_wifi.clicked.connect(self.iniciar_conexao_wifi)
+
+        btn_cancelar_wifi = QtWidgets.QPushButton("CANCELAR / VOLTAR")
+        btn_cancelar_wifi.setFont(QFont("Arial", 12, QFont.Bold))
+        btn_cancelar_wifi.setFixedHeight(40)
+        btn_cancelar_wifi.setStyleSheet("background-color: #757575; color: white; border-radius: 6px;")
+        btn_cancelar_wifi.clicked.connect(lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
+
+        btn_layout.addWidget(btn_cancelar_wifi)
+        btn_layout.addWidget(self.btn_conectar_wifi)
+
+        layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
+        layout.addWidget(titulo, alignment=Qt.AlignCenter)
+        layout.addWidget(self.lbl_wifi_status, alignment=Qt.AlignCenter)
+        layout.addLayout(form_layout)
+        layout.addWidget(self.teclado)
+        layout.addLayout(btn_layout)
+
+        # Campo padrão focado inicialmente
+        self.definir_foco_campo(self.input_ssid)
+
+        tela.setLayout(layout)
+        return tela
+
+    def definir_foco_campo(self, campo):
+        self.campo_focado_wifi = campo
+        self.input_ssid.setStyleSheet("background-color: white; border: 1px solid #777; border-radius: 4px; padding: 2px 5px;")
+        self.input_senha.setStyleSheet("background-color: white; border: 1px solid #777; border-radius: 4px; padding: 2px 5px;")
+        campo.setStyleSheet("background-color: #FFF9C4; border: 2px solid #1565C0; border-radius: 4px; padding: 2px 5px;")
+
+    def ao_digitar_teclado(self, valor):
+        if not self.campo_focado_wifi:
+            return
+
+        if valor == "BACKSPACE":
+            self.campo_focado_wifi.setText(self.campo_focado_wifi.text()[:-1])
+        elif valor == "CLEAR":
+            self.campo_focado_wifi.clear()
+        else:
+            self.campo_focado_wifi.setText(self.campo_focado_wifi.text() + valor)
+
+    def iniciar_conexao_wifi(self):
+        ssid = self.input_ssid.text().strip()
+        senha = self.input_senha.text().strip()
+
+        if not ssid:
+            self.lbl_wifi_status.setText("Por favor, digite o nome da rede (SSID).")
+            self.lbl_wifi_status.setStyleSheet("color: #C62828; font-weight: bold;")
+            return
+
+        self.lbl_wifi_status.setText(f"Conectando à rede '{ssid}'... Aguarde...")
+        self.lbl_wifi_status.setStyleSheet("color: #1565C0; font-weight: bold;")
+        self.btn_conectar_wifi.setEnabled(False)
+
+        def _worker_wifi():
+            sucesso, msg = conectar_wifi_nmcli(ssid, senha)
+            if sucesso:
+                # Validar se realmente ganhou internet
+                if testar_conexao_internet(timeout=4):
+                    self.sinal_wifi_finalizado.emit(True, "Conectado e Internet Validada com Sucesso!")
+                else:
+                    self.sinal_wifi_finalizado.emit(False, "Wi-Fi Conectado, mas Sem Acesso à Internet.")
+            else:
+                self.sinal_wifi_finalizado.emit(False, msg)
+
+        threading.Thread(target=_worker_wifi, daemon=True).start()
+
+    @pyqtSlot(bool, str)
+    def ao_concluir_conexao_wifi(self, sucesso, mensagem):
+        self.btn_conectar_wifi.setEnabled(True)
+        if sucesso:
+            self.preparar_leitura(
+                "SINCRONIZAR_GIT_MESTRE",
+                "Conexão Estabelecida!\nAproxime o CRACHÁ MESTRE para autorizar a Sincronização"
+            )
+        else:
+            self.lbl_wifi_status.setText(f"Falha: {mensagem}\nTente novamente ou volte ao menu.")
+            self.lbl_wifi_status.setStyleSheet("color: #C62828; font-weight: bold;")
+
+    def iniciar_sincronizacao_git(self):
+        self.mostrar_confirmacao_operacao("Sincronizando com o Git...\nAguarde...", "#1565C0")
+        threading.Thread(target=self._worker_sincronizar_git, daemon=True).start()
+
+    def _worker_sincronizar_git(self):
+        try:
+            os.makedirs(PASTA_CHECKLISTS, exist_ok=True)
+
+            # 1. Adicionar PDFs e planilha alterada ao git
+            subprocess.run(["git", "add", "checklists/.", "Lista_Basedecrachás.xlsx"], check=True, capture_output=True, text=True)
+
+            # 2. Criar commit
+            msg_commit = f"Sincronização manual - {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+            res_commit = subprocess.run(["git", "commit", "-m", msg_commit], capture_output=True, text=True)
+
+            # 3. Fazer o Push para o repositório remoto
+            res_push = subprocess.run(["git", "push"], capture_output=True, text=True)
+
+            if res_push.returncode == 0:
+                if "nothing to commit" in res_commit.stdout or "nothing to commit" in res_commit.stderr:
+                    self.sinal_git_finalizado.emit(True, "Nenhum checklist novo para enviar.\nGit já atualizado!")
+                else:
+                    self.sinal_git_finalizado.emit(True, "Checklists e Dados Enviados ao Git com Sucesso!")
+            else:
+                self.sinal_git_finalizado.emit(False, f"Erro no Git Push:\n{res_push.stderr[:100]}")
+
+        except subprocess.CalledProcessError as e:
+            err_msg = e.stderr if e.stderr else str(e)
+            self.sinal_git_finalizado.emit(False, f"Falha no Git:\n{err_msg[:100]}")
+        except Exception as e:
+            self.sinal_git_finalizado.emit(False, f"Erro inesperado:\n{str(e)[:100]}")
+
+    @pyqtSlot(bool, str)
+    def ao_concluir_sincronizacao_git(self, sucesso, mensagem):
+        cor_fundo = "#2E7D32" if sucesso else "#C62828"
+        self.mostrar_confirmacao_operacao(mensagem, cor_fundo)
 
     # ========================================================================
     # TELA DE LEITURA RFID
@@ -737,7 +1073,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         layout.setContentsMargins(20, 20, 20, 20)
 
         self.lbl_confirmacao_operacao = QtWidgets.QLabel()
-        self.lbl_confirmacao_operacao.setFont(QFont("Arial", 24, QFont.Bold))
+        self.lbl_confirmacao_operacao.setFont(QFont("Arial", 20, QFont.Bold))
         self.lbl_confirmacao_operacao.setAlignment(Qt.AlignCenter)
         self.lbl_confirmacao_operacao.setStyleSheet("color: white; background-color: transparent;")
         self.lbl_confirmacao_operacao.setWordWrap(True)
@@ -811,7 +1147,6 @@ class SistemaGT(QtWidgets.QMainWindow):
 
         self._aplicar_resultado_checklist(dados_checklist)
 
-        # Gerar o PDF localmente em segundo plano para não travar a interface
         self.thread_finalizacao = threading.Thread(
             target=self._gerar_pdf_em_background,
             args=(dados_checklist,),
@@ -834,7 +1169,6 @@ class SistemaGT(QtWidgets.QMainWindow):
             self.mudar_tela(self.tela_reprovado_bloqueado, "SISTEMA_BLOQUEADO")
 
     def _gerar_pdf_em_background(self, dados_checklist):
-        """Gera o registro PDF localmente sem travar a interface."""
         try:
             pdf_path = self.gerar_pdf_checklist(dados_checklist)
             if pdf_path:
@@ -854,7 +1188,6 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.timer_liberacao.start(TEMPO_LIBERACAO_SEGUNDOS * 1000)
 
     def finalizar_tempo_liberacao(self):
-        """Desliga os GPIOs, reseta timers e retorna ao menu principal."""
         self.timer_liberacao.stop()
         self.timer_cronometro.stop()
         self.fim_liberacao = None
@@ -866,7 +1199,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         if hasattr(self, 'lbl_tempo_restante'):
             self.lbl_tempo_restante.setText("00:00:00")
 
-        set_gpios(0)  # Desliga Relé e LED Verde
+        set_gpios(0)
         self.mudar_tela(self.tela_liberar_gt, "MENU_GT")
 
     # ========================================================================
@@ -900,7 +1233,13 @@ class SistemaGT(QtWidgets.QMainWindow):
         if self.central_widget.currentWidget() != self.tela_leitura:
             return
 
-        if self.estado_atual == "LIBERAR_EQUIPAMENTO":
+        if self.estado_atual == "SINCRONIZAR_GIT_MESTRE":
+            if uid_clean == UID_MESTRE:
+                self.iniciar_sincronizacao_git()
+            else:
+                self.mostrar_mensagem("ERRO\n\nCrachá não é Mestre!", "#C62828", "white")
+
+        elif self.estado_atual == "LIBERAR_EQUIPAMENTO":
             func = self.dados.buscar_por_cracha(uid_clean)
             if not func:
                 self.mostrar_mensagem("ACESSO NEGADO\n\nCrachá não cadastrado!", "#C62828", "white")
