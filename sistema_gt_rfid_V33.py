@@ -3,7 +3,7 @@
 """
 Sistema Completo de Controle de Acesso GBMX e Checklist de Segurança - Liberar GT
 Otimizado para Tela Raspberry Pi de 5 Polegadas (800x480)
-Versão 33 - Interface Visual Aprimorada para Touchscreen
+Versão 33 - Interface Visual Aprimorada para Touchscreen (Fontes Ampliadas)
 Com Diagnóstico de Rede Assíncrono e Interface Não-Bloqueante
 """
 
@@ -74,13 +74,11 @@ def testar_conexao_internet(host="8.8.8.8", port=53, timeout=3):
 def obter_wifi_ssid():
     """Obtém o SSID do Wi-Fi atualmente conectado no Raspberry Pi OS."""
     try:
-        # Método 1: via iwgetid
         result = subprocess.run(['iwgetid', '-r'], capture_output=True, text=True, timeout=2)
         ssid = result.stdout.strip()
         if ssid:
             return ssid
 
-        # Método 2: via nmcli
         result = subprocess.run(['nmcli', '-t', '-f', 'active,ssid', 'dev', 'wifi'], capture_output=True, text=True, timeout=2)
         for line in result.stdout.splitlines():
             if line.startswith('yes:'):
@@ -391,7 +389,7 @@ class GerenciadorDados:
 class SistemaGT(QtWidgets.QMainWindow):
     sinal_git_finalizado = pyqtSignal(bool, str)
     sinal_wifi_finalizado = pyqtSignal(bool, str)
-    sinal_diagnostico_rede = pyqtSignal(bool, bool, str)  # (tem_wifi, tem_internet, ssid)
+    sinal_diagnostico_rede = pyqtSignal(bool, bool, str)
 
     def __init__(self):
         super().__init__()
@@ -482,9 +480,9 @@ class SistemaGT(QtWidgets.QMainWindow):
 
     def criar_widget_cabecalho(self):
         lbl = QtWidgets.QLabel()
-        lbl.setFont(QFont("Arial", 13, QFont.Bold))
+        lbl.setFont(QFont("Arial", 12, QFont.Bold))
         lbl.setAlignment(Qt.AlignCenter)
-        lbl.setStyleSheet("color: #1A237E; background-color: #E8EAF6; padding: 6px 14px; border-radius: 8px;")
+        lbl.setStyleSheet("color: #1A237E; background-color: #E8EAF6; padding: 4px 12px; border-radius: 6px;")
         self.labels_data_hora.append(lbl)
         return lbl
 
@@ -623,7 +621,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         return tela
 
     # ========================================================================
-    # TELA E FLUXO DA OPÇÃO 4: DIAGNÓSTICO DE REDE E SINCRONIZAR GIT
+    # DIAGNÓSTICO DE REDE E GIT
     # ========================================================================
     def criar_tela_status_rede(self):
         tela = QtWidgets.QWidget()
@@ -648,7 +646,6 @@ class SistemaGT(QtWidgets.QMainWindow):
         )
         self.lbl_status_rede_detalhe.setFixedSize(680, 160)
 
-        # Container dos Botões de Ação
         self.container_btn_rede = QtWidgets.QWidget()
         h_btn = QtWidgets.QHBoxLayout(self.container_btn_rede)
         h_btn.setSpacing(12)
@@ -694,7 +691,6 @@ class SistemaGT(QtWidgets.QMainWindow):
         return tela
 
     def ao_clicar_opcao_git(self):
-        """Inicia a verificação de rede assíncrona sem travar a interface."""
         self.mudar_tela(self.tela_status_rede, "DIAGNOSTICO_REDE")
         self.lbl_status_rede_detalhe.setText("Verificando conexão com a rede e internet...\nAguarde...")
         self.lbl_status_rede_detalhe.setStyleSheet(
@@ -714,21 +710,18 @@ class SistemaGT(QtWidgets.QMainWindow):
     def ao_concluir_diagnostico_rede(self, tem_wifi, tem_internet, ssid):
         self.container_btn_rede.setEnabled(True)
 
-        # CASO 1: Não está conectado ao Wi-Fi
         if not tem_wifi:
             self.lbl_wifi_status.setText("Nenhuma rede Wi-Fi conectada.\nInforme os dados da rede/hotspot:")
             self.lbl_wifi_status.setStyleSheet("color: #C62828; font-weight: bold; font-size: 13px;")
             self.mudar_tela(self.tela_wifi, "CONFIGURAR_WIFI")
             return
 
-        # CASO 2: Conectado ao Wi-Fi E tem Internet
         if tem_wifi and tem_internet:
             self.preparar_leitura(
                 "SINCRONIZAR_GIT_MESTRE",
                 f"Conectado à rede: {ssid}\n\nAproxime o CRACHÁ MESTRE para autorizar a Sincronização"
             )
         else:
-            # CASO 3: Conectado ao Wi-Fi, mas SEM Internet
             msg_detalhe = (
                 f"REDE WI-FI: {ssid}\n"
                 f"STATUS DA CONEXÃO: Conectado ao Roteador/Hotspot\n"
@@ -757,7 +750,6 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.lbl_wifi_status.setFont(QFont("Arial", 12))
         self.lbl_wifi_status.setAlignment(Qt.AlignCenter)
 
-        # Campos de texto
         form_layout = QtWidgets.QHBoxLayout()
         form_layout.setSpacing(10)
 
@@ -784,11 +776,9 @@ class SistemaGT(QtWidgets.QMainWindow):
         form_layout.addWidget(lbl_senha)
         form_layout.addWidget(self.input_senha, 1)
 
-        # Teclado Virtual
         self.teclado = TecladoVirtual()
         self.teclado.tecla_pressionada.connect(self.ao_digitar_teclado)
 
-        # Botoes
         btn_layout = QtWidgets.QHBoxLayout()
         btn_layout.setSpacing(12)
 
@@ -900,14 +890,11 @@ class SistemaGT(QtWidgets.QMainWindow):
         try:
             os.makedirs(PASTA_CHECKLISTS, exist_ok=True)
 
-            # 1. Adicionar PDFs e planilha alterada ao git
             subprocess.run(["git", "add", "checklists/.", "Lista_Basedecrachás.xlsx"], check=True, capture_output=True, text=True, timeout=10)
 
-            # 2. Criar commit
             msg_commit = f"Sincronização manual - {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
             res_commit = subprocess.run(["git", "commit", "-m", msg_commit], capture_output=True, text=True, timeout=10)
 
-            # 3. Fazer o Push para o repositório remoto
             res_push = subprocess.run(["git", "push"], capture_output=True, text=True, timeout=20)
 
             if res_push.returncode == 0:
@@ -1008,23 +995,29 @@ class SistemaGT(QtWidgets.QMainWindow):
         QTimer.singleShot(3000, lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
 
     # ========================================================================
-    # CHECKLIST
+    # CHECKLIST (OTIMIZADO COM FONTES DE 16PT EM CARD VISUAL)
     # ========================================================================
     def criar_bloco_pergunta(self, idx_pergunta):
-        container = QtWidgets.QWidget()
-        container.setAttribute(Qt.WA_TranslucentBackground)
-        container.setStyleSheet("background-color: transparent;")
+        container = QtWidgets.QFrame()
+        container.setStyleSheet("""
+            QFrame {
+                background-color: #FFFFFF;
+                border: 2px solid #CFD8DC;
+                border-radius: 10px;
+            }
+        """)
         container.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
 
         layout = QtWidgets.QVBoxLayout(container)
-        layout.setContentsMargins(10, 4, 10, 4)
-        layout.setSpacing(6)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(8)
 
+        # Pergunta com fonte ampliada para 16pt em Negrito para máxima legibilidade
         lbl_p = QtWidgets.QLabel(f"{idx_pergunta + 1}. {self.perguntas[idx_pergunta]}")
-        lbl_p.setFont(QFont("Arial", 14, QFont.Bold))
+        lbl_p.setFont(QFont("Arial", 16, QFont.Bold))
         lbl_p.setWordWrap(True)
         lbl_p.setAlignment(Qt.AlignCenter)
-        lbl_p.setStyleSheet("background-color: transparent; color: #111111; padding: 0;")
+        lbl_p.setStyleSheet("background-color: transparent; color: #000000; border: none; padding: 0px;")
 
         h_btn = QtWidgets.QHBoxLayout()
         h_btn.setSpacing(16)
@@ -1032,14 +1025,14 @@ class SistemaGT(QtWidgets.QMainWindow):
 
         btn_ok = QtWidgets.QPushButton("OK")
         btn_ok.setFont(QFont("Arial", 14, QFont.Bold))
-        btn_ok.setFixedSize(170, 46)
+        btn_ok.setFixedSize(160, 44)
         btn_ok.setStyleSheet(
             "background-color: #E8F5E9; color: #2E7D32; border: 2px solid #2E7D32; border-radius: 8px;"
         )
 
         btn_nok = QtWidgets.QPushButton("NÃO OK")
         btn_nok.setFont(QFont("Arial", 14, QFont.Bold))
-        btn_nok.setFixedSize(170, 46)
+        btn_nok.setFixedSize(160, 44)
         btn_nok.setStyleSheet(
             "background-color: #FFEBEE; color: #C62828; border: 2px solid #C62828; border-radius: 8px;"
         )
@@ -1074,14 +1067,14 @@ class SistemaGT(QtWidgets.QMainWindow):
     def criar_tela_par_perguntas(self, idx1, idx2):
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(tela)
-        layout.setContentsMargins(12, 6, 12, 6)
-        layout.setSpacing(4)
+        layout.setContentsMargins(10, 4, 10, 4)
+        layout.setSpacing(6)
         layout.setAlignment(Qt.AlignCenter)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
         header = QtWidgets.QLabel("CHECKLIST DE SEGURANÇA")
-        header.setFont(QFont("Arial", 14, QFont.Bold))
+        header.setFont(QFont("Arial", 13, QFont.Bold))
         header.setAlignment(Qt.AlignCenter)
         header.setStyleSheet("color: #1A237E; background-color: transparent;")
 
@@ -1105,7 +1098,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         """
 
         btn_voltar = QtWidgets.QPushButton("◄ ANTERIOR")
-        btn_voltar.setFixedHeight(46)
+        btn_voltar.setFixedHeight(44)
         btn_voltar.setStyleSheet(style_btn_nav.format(cor="#757575", cor_press="#424242"))
 
         idx_tela_atual = idx1 // 2
@@ -1116,7 +1109,7 @@ class SistemaGT(QtWidgets.QMainWindow):
                                                                f"CHK_PAG_{idx_tela_atual - 1}"))
 
         btn_proximo = QtWidgets.QPushButton("PRÓXIMO ►")
-        btn_proximo.setFixedHeight(46)
+        btn_proximo.setFixedHeight(44)
         btn_proximo.setStyleSheet(style_btn_nav.format(cor="#1565C0", cor_press="#0D47A1"))
         btn_proximo.clicked.connect(lambda: self.validar_e_avancar_pagina(idx_tela_atual))
 
@@ -1125,25 +1118,22 @@ class SistemaGT(QtWidgets.QMainWindow):
 
         layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
         layout.addWidget(header, alignment=Qt.AlignCenter)
-        layout.addStretch(1)
-        layout.addWidget(bloco1, alignment=Qt.AlignCenter)
-        layout.addStretch(1)
-        layout.addWidget(bloco2, alignment=Qt.AlignCenter)
-        layout.addStretch(1)
+        layout.addWidget(bloco1)
+        layout.addWidget(bloco2)
         layout.addLayout(botoes_nav)
         return tela
 
     def criar_tela_pergunta_final(self, idx_pergunta):
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(tela)
-        layout.setContentsMargins(12, 6, 12, 6)
-        layout.setSpacing(6)
+        layout.setContentsMargins(10, 4, 10, 4)
+        layout.setSpacing(8)
         layout.setAlignment(Qt.AlignCenter)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
         header = QtWidgets.QLabel("CHECKLIST DE SEGURANÇA - FINALIZAÇÃO")
-        header.setFont(QFont("Arial", 14, QFont.Bold))
+        header.setFont(QFont("Arial", 13, QFont.Bold))
         header.setAlignment(Qt.AlignCenter)
         header.setStyleSheet("color: #1A237E; background-color: transparent;")
 
@@ -1166,13 +1156,13 @@ class SistemaGT(QtWidgets.QMainWindow):
         """
 
         btn_voltar = QtWidgets.QPushButton("◄ ANTERIOR")
-        btn_voltar.setFixedHeight(46)
+        btn_voltar.setFixedHeight(44)
         btn_voltar.setStyleSheet(style_btn_nav.format(cor="#757575", cor_press="#424242"))
         btn_voltar.clicked.connect(lambda: self.mudar_tela(self.telas_checklist_perguntas[4], "CHK_PAG_4"))
 
         btn_concluir = QtWidgets.QPushButton("CONCLUIR CHECKLIST")
         self.btn_concluir_checklist = btn_concluir
-        btn_concluir.setFixedHeight(46)
+        btn_concluir.setFixedHeight(44)
         btn_concluir.setStyleSheet(style_btn_nav.format(cor="#2E7D32", cor_press="#1B5E20"))
         btn_concluir.clicked.connect(self.processar_finalizacao_checklist)
 
@@ -1182,7 +1172,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
         layout.addWidget(header, alignment=Qt.AlignCenter)
         layout.addStretch(1)
-        layout.addWidget(bloco1, alignment=Qt.AlignCenter)
+        layout.addWidget(bloco1)
         layout.addStretch(1)
         layout.addLayout(botoes_nav)
         return tela
