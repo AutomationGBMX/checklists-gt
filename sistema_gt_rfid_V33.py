@@ -3,7 +3,7 @@
 """
 Sistema Completo de Controle de Acesso GBMX e Checklist de Segurança - Liberar GT
 Otimizado para Tela Raspberry Pi de 5 Polegadas (800x480)
-Versão 35.1 - Operação Local + Validação Wi-Fi / Hotspot + Git Sync via Crachá Mestre
+Versão 33 - Interface Visual Aprimorada para Touchscreen
 Com Diagnóstico de Rede Assíncrono e Interface Não-Bloqueante
 """
 
@@ -108,7 +108,7 @@ def conectar_wifi_nmcli(ssid, senha):
 
 
 # ============================================================================
-# TECLADO VIRTUAL TOUCH (PARA TELA DE 5 POLEGADAS 800x480)
+# TECLADO VIRTUAL TOUCH (OTIMIZADO PARA TOUCHSCREEN 800x480)
 # ============================================================================
 class TecladoVirtual(QtWidgets.QWidget):
     tecla_pressionada = pyqtSignal(str)
@@ -121,7 +121,7 @@ class TecladoVirtual(QtWidgets.QWidget):
     def configurar_layout(self):
         self.layout_principal = QtWidgets.QVBoxLayout(self)
         self.layout_principal.setContentsMargins(2, 2, 2, 2)
-        self.layout_principal.setSpacing(3)
+        self.layout_principal.setSpacing(4)
 
         self.linhas_teclas = [
             ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '⌫'],
@@ -150,34 +150,51 @@ class TecladoVirtual(QtWidgets.QWidget):
         style_tecla = """
             QPushButton {
                 background-color: #E0E0E0;
-                color: #111;
+                color: #111111;
                 font-weight: bold;
-                font-size: 13px;
+                font-size: 14px;
                 border: 1px solid #BDBDBD;
-                border-radius: 4px;
+                border-radius: 6px;
             }
             QPushButton:pressed {
                 background-color: #1565C0;
-                color: white;
+                color: #FFFFFF;
+            }
+        """
+
+        style_especial = """
+            QPushButton {
+                background-color: #CFD8DC;
+                color: #111111;
+                font-weight: bold;
+                font-size: 13px;
+                border: 1px solid #90A4AE;
+                border-radius: 6px;
+            }
+            QPushButton:pressed {
+                background-color: #1565C0;
+                color: #FFFFFF;
             }
         """
 
         for linha in self.linhas_teclas:
             h_layout = QtWidgets.QHBoxLayout()
-            h_layout.setSpacing(3)
+            h_layout.setSpacing(4)
             for k in linha:
                 btn_txt = k
                 if len(k) == 1 and k.isalpha():
                     btn_txt = k.upper() if self.maiusculo else k.lower()
 
                 btn = QtWidgets.QPushButton(btn_txt)
-                btn.setFixedHeight(34)
-                btn.setStyleSheet(style_tecla)
+                btn.setFixedHeight(38)
 
                 if k in ['⌫', 'LIMPAR', 'a/A']:
-                    btn.setStyleSheet(style_tecla + "background-color: #CFD8DC;")
+                    btn.setStyleSheet(style_especial)
                 elif k == 'ESPAÇO':
-                    btn.setMinimumWidth(180)
+                    btn.setStyleSheet(style_tecla)
+                    btn.setMinimumWidth(200)
+                else:
+                    btn.setStyleSheet(style_tecla)
 
                 btn.clicked.connect(lambda checked, val=k: self.tratar_clique(val))
                 h_layout.addWidget(btn)
@@ -465,9 +482,9 @@ class SistemaGT(QtWidgets.QMainWindow):
 
     def criar_widget_cabecalho(self):
         lbl = QtWidgets.QLabel()
-        lbl.setFont(QFont("Arial", 12, QFont.Bold))
+        lbl.setFont(QFont("Arial", 13, QFont.Bold))
         lbl.setAlignment(Qt.AlignCenter)
-        lbl.setStyleSheet("color: #1A237E; background-color: #E8EAF6; padding: 4px 12px; border-radius: 6px;")
+        lbl.setStyleSheet("color: #1A237E; background-color: #E8EAF6; padding: 6px 14px; border-radius: 8px;")
         self.labels_data_hora.append(lbl)
         return lbl
 
@@ -549,41 +566,50 @@ class SistemaGT(QtWidgets.QMainWindow):
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout()
         layout.setAlignment(Qt.AlignCenter)
-        layout.setContentsMargins(15, 8, 15, 8)
-        layout.setSpacing(8)
+        layout.setContentsMargins(15, 10, 15, 10)
+        layout.setSpacing(10)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
         titulo = QtWidgets.QLabel("MENU - LIBERAR GT")
         titulo.setFont(QFont("Arial", 18, QFont.Bold))
         titulo.setAlignment(Qt.AlignCenter)
-        titulo.setStyleSheet("color: #212121; margin-top: 2px; margin-bottom: 2px;")
+        titulo.setStyleSheet("color: #212121; margin-top: 2px; margin-bottom: 4px;")
+
+        btn_style_base = """
+            QPushButton {{
+                background-color: {cor};
+                color: white;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 14pt;
+            }}
+            QPushButton:pressed {{
+                background-color: {cor_press};
+            }}
+        """
 
         btn_liberar = QtWidgets.QPushButton("1 - LIBERAR EQUIPAMENTO")
-        btn_liberar.setFont(QFont("Arial", 13, QFont.Bold))
-        btn_liberar.setFixedSize(480, 48)
-        btn_liberar.setStyleSheet("background-color: #2E7D32; color: white; border-radius: 8px;")
+        btn_liberar.setFixedSize(540, 52)
+        btn_liberar.setStyleSheet(btn_style_base.format(cor="#2E7D32", cor_press="#1B5E20"))
         btn_liberar.clicked.connect(
             lambda: self.preparar_leitura("LIBERAR_EQUIPAMENTO", "Aproxime o crachá para LIBERAR O EQUIPAMENTO"))
 
         btn_habilitar = QtWidgets.QPushButton("2 - HABILITAR USUÁRIO")
-        btn_habilitar.setFont(QFont("Arial", 13, QFont.Bold))
-        btn_habilitar.setFixedSize(480, 48)
-        btn_habilitar.setStyleSheet("background-color: #1565C0; color: white; border-radius: 8px;")
+        btn_habilitar.setFixedSize(540, 52)
+        btn_habilitar.setStyleSheet(btn_style_base.format(cor="#1565C0", cor_press="#0D47A1"))
         btn_habilitar.clicked.connect(
             lambda: self.preparar_leitura("HABILITAR_USUARIO_MESTRE", "Aproxime o CRACHÁ MESTRE para autorizar"))
 
         btn_desabilitar = QtWidgets.QPushButton("3 - DESABILITAR USUÁRIO")
-        btn_desabilitar.setFont(QFont("Arial", 13, QFont.Bold))
-        btn_desabilitar.setFixedSize(480, 48)
-        btn_desabilitar.setStyleSheet("background-color: #C62828; color: white; border-radius: 8px;")
+        btn_desabilitar.setFixedSize(540, 52)
+        btn_desabilitar.setStyleSheet(btn_style_base.format(cor="#C62828", cor_press="#8E0000"))
         btn_desabilitar.clicked.connect(
             lambda: self.preparar_leitura("DESABILITAR_USUARIO_MESTRE", "Aproxime o CRACHÁ MESTRE para autorizar"))
 
         btn_git = QtWidgets.QPushButton("4 - SINCRONIZAR CHECKLISTS (GIT)")
-        btn_git.setFont(QFont("Arial", 13, QFont.Bold))
-        btn_git.setFixedSize(480, 48)
-        btn_git.setStyleSheet("background-color: #E65100; color: white; border-radius: 8px;")
+        btn_git.setFixedSize(540, 52)
+        btn_git.setStyleSheet(btn_style_base.format(cor="#E65100", cor_press="#BF360C"))
         btn_git.clicked.connect(self.ao_clicar_opcao_git)
 
         layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
@@ -603,8 +629,8 @@ class SistemaGT(QtWidgets.QMainWindow):
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(tela)
         layout.setAlignment(Qt.AlignCenter)
-        layout.setContentsMargins(15, 10, 15, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(15, 12, 15, 12)
+        layout.setSpacing(12)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
@@ -614,35 +640,45 @@ class SistemaGT(QtWidgets.QMainWindow):
         titulo.setStyleSheet("color: #1A237E;")
 
         self.lbl_status_rede_detalhe = QtWidgets.QLabel("Verificando conexão com a internet...")
-        self.lbl_status_rede_detalhe.setFont(QFont("Arial", 12, QFont.Bold))
+        self.lbl_status_rede_detalhe.setFont(QFont("Arial", 13, QFont.Bold))
         self.lbl_status_rede_detalhe.setAlignment(Qt.AlignCenter)
         self.lbl_status_rede_detalhe.setWordWrap(True)
         self.lbl_status_rede_detalhe.setStyleSheet(
-            "color: #1565C0; padding: 15px; border: 2px solid #1565C0; border-radius: 8px; background-color: #E3F2FD;"
+            "color: #1565C0; padding: 15px; border: 2px solid #1565C0; border-radius: 10px; background-color: #E3F2FD;"
         )
-        self.lbl_status_rede_detalhe.setFixedSize(600, 150)
+        self.lbl_status_rede_detalhe.setFixedSize(680, 160)
 
         # Container dos Botões de Ação
         self.container_btn_rede = QtWidgets.QWidget()
         h_btn = QtWidgets.QHBoxLayout(self.container_btn_rede)
-        h_btn.setSpacing(10)
+        h_btn.setSpacing(12)
+
+        style_btn = """
+            QPushButton {{
+                background-color: {cor};
+                color: white;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 12pt;
+            }}
+            QPushButton:pressed {{
+                background-color: {cor_press};
+            }}
+        """
 
         self.btn_voltar_rede = QtWidgets.QPushButton("VOLTAR AO MENU")
-        self.btn_voltar_rede.setFont(QFont("Arial", 11, QFont.Bold))
-        self.btn_voltar_rede.setFixedHeight(42)
-        self.btn_voltar_rede.setStyleSheet("background-color: #757575; color: white; border-radius: 6px;")
+        self.btn_voltar_rede.setFixedHeight(48)
+        self.btn_voltar_rede.setStyleSheet(style_btn.format(cor="#757575", cor_press="#424242"))
         self.btn_voltar_rede.clicked.connect(lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
 
         self.btn_ir_wifi = QtWidgets.QPushButton("CONFIGURAR WI-FI")
-        self.btn_ir_wifi.setFont(QFont("Arial", 11, QFont.Bold))
-        self.btn_ir_wifi.setFixedHeight(42)
-        self.btn_ir_wifi.setStyleSheet("background-color: #E65100; color: white; border-radius: 6px;")
+        self.btn_ir_wifi.setFixedHeight(48)
+        self.btn_ir_wifi.setStyleSheet(style_btn.format(cor="#E65100", cor_press="#BF360C"))
         self.btn_ir_wifi.clicked.connect(lambda: self.mudar_tela(self.tela_wifi, "CONFIGURAR_WIFI"))
 
         self.btn_tentar_rede = QtWidgets.QPushButton("TENTAR NOVAMENTE")
-        self.btn_tentar_rede.setFont(QFont("Arial", 11, QFont.Bold))
-        self.btn_tentar_rede.setFixedHeight(42)
-        self.btn_tentar_rede.setStyleSheet("background-color: #1565C0; color: white; border-radius: 6px;")
+        self.btn_tentar_rede.setFixedHeight(48)
+        self.btn_tentar_rede.setStyleSheet(style_btn.format(cor="#1565C0", cor_press="#0D47A1"))
         self.btn_tentar_rede.clicked.connect(self.ao_clicar_opcao_git)
 
         h_btn.addWidget(self.btn_voltar_rede)
@@ -662,7 +698,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.mudar_tela(self.tela_status_rede, "DIAGNOSTICO_REDE")
         self.lbl_status_rede_detalhe.setText("Verificando conexão com a rede e internet...\nAguarde...")
         self.lbl_status_rede_detalhe.setStyleSheet(
-            "color: #1565C0; padding: 15px; border: 2px solid #1565C0; border-radius: 8px; background-color: #E3F2FD;"
+            "color: #1565C0; padding: 15px; border: 2px solid #1565C0; border-radius: 10px; background-color: #E3F2FD;"
         )
         self.container_btn_rede.setEnabled(False)
 
@@ -701,24 +737,24 @@ class SistemaGT(QtWidgets.QMainWindow):
             )
             self.lbl_status_rede_detalhe.setText(msg_detalhe)
             self.lbl_status_rede_detalhe.setStyleSheet(
-                "color: #C62828; padding: 15px; border: 2px solid #C62828; border-radius: 8px; background-color: #FFEBEE;"
+                "color: #C62828; padding: 15px; border: 2px solid #C62828; border-radius: 10px; background-color: #FFEBEE;"
             )
 
     def criar_tela_wifi(self):
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(tela)
-        layout.setContentsMargins(10, 5, 10, 5)
-        layout.setSpacing(4)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(6)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
         titulo = QtWidgets.QLabel("CONFIGURAÇÃO DE WI-FI / HOTSPOT")
-        titulo.setFont(QFont("Arial", 14, QFont.Bold))
+        titulo.setFont(QFont("Arial", 15, QFont.Bold))
         titulo.setAlignment(Qt.AlignCenter)
         titulo.setStyleSheet("color: #1A237E;")
 
         self.lbl_wifi_status = QtWidgets.QLabel("Informe o SSID e a Senha para conectar:")
-        self.lbl_wifi_status.setFont(QFont("Arial", 11))
+        self.lbl_wifi_status.setFont(QFont("Arial", 12))
         self.lbl_wifi_status.setAlignment(Qt.AlignCenter)
 
         # Campos de texto
@@ -726,17 +762,19 @@ class SistemaGT(QtWidgets.QMainWindow):
         form_layout.setSpacing(10)
 
         lbl_ssid = QtWidgets.QLabel("Rede (SSID):")
-        lbl_ssid.setFont(QFont("Arial", 11, QFont.Bold))
+        lbl_ssid.setFont(QFont("Arial", 12, QFont.Bold))
         self.input_ssid = QtWidgets.QLineEdit()
-        self.input_ssid.setFixedHeight(32)
-        self.input_ssid.setStyleSheet("background-color: white; border: 1px solid #777; border-radius: 4px; padding: 2px 5px;")
+        self.input_ssid.setFixedHeight(36)
+        self.input_ssid.setFont(QFont("Arial", 12))
+        self.input_ssid.setStyleSheet("background-color: white; border: 1px solid #777; border-radius: 6px; padding: 2px 8px;")
 
         lbl_senha = QtWidgets.QLabel("Senha:")
-        lbl_senha.setFont(QFont("Arial", 11, QFont.Bold))
+        lbl_senha.setFont(QFont("Arial", 12, QFont.Bold))
         self.input_senha = QtWidgets.QLineEdit()
         self.input_senha.setEchoMode(QtWidgets.QLineEdit.Password)
-        self.input_senha.setFixedHeight(32)
-        self.input_senha.setStyleSheet("background-color: white; border: 1px solid #777; border-radius: 4px; padding: 2px 5px;")
+        self.input_senha.setFixedHeight(36)
+        self.input_senha.setFont(QFont("Arial", 12))
+        self.input_senha.setStyleSheet("background-color: white; border: 1px solid #777; border-radius: 6px; padding: 2px 8px;")
 
         self.input_ssid.mousePressEvent = lambda e: self.definir_foco_campo(self.input_ssid)
         self.input_senha.mousePressEvent = lambda e: self.definir_foco_campo(self.input_senha)
@@ -752,18 +790,29 @@ class SistemaGT(QtWidgets.QMainWindow):
 
         # Botoes
         btn_layout = QtWidgets.QHBoxLayout()
-        btn_layout.setSpacing(10)
+        btn_layout.setSpacing(12)
+
+        btn_style_nav = """
+            QPushButton {{
+                background-color: {cor};
+                color: white;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 13pt;
+            }}
+            QPushButton:pressed {{
+                background-color: {cor_press};
+            }}
+        """
 
         self.btn_conectar_wifi = QtWidgets.QPushButton("CONECTAR E CONTINUAR")
-        self.btn_conectar_wifi.setFont(QFont("Arial", 12, QFont.Bold))
-        self.btn_conectar_wifi.setFixedHeight(40)
-        self.btn_conectar_wifi.setStyleSheet("background-color: #2E7D32; color: white; border-radius: 6px;")
+        self.btn_conectar_wifi.setFixedHeight(44)
+        self.btn_conectar_wifi.setStyleSheet(btn_style_nav.format(cor="#2E7D32", cor_press="#1B5E20"))
         self.btn_conectar_wifi.clicked.connect(self.iniciar_conexao_wifi)
 
         btn_cancelar_wifi = QtWidgets.QPushButton("CANCELAR / VOLTAR")
-        btn_cancelar_wifi.setFont(QFont("Arial", 12, QFont.Bold))
-        btn_cancelar_wifi.setFixedHeight(40)
-        btn_cancelar_wifi.setStyleSheet("background-color: #757575; color: white; border-radius: 6px;")
+        btn_cancelar_wifi.setFixedHeight(44)
+        btn_cancelar_wifi.setStyleSheet(btn_style_nav.format(cor="#757575", cor_press="#424242"))
         btn_cancelar_wifi.clicked.connect(lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
 
         btn_layout.addWidget(btn_cancelar_wifi)
@@ -783,9 +832,11 @@ class SistemaGT(QtWidgets.QMainWindow):
 
     def definir_foco_campo(self, campo):
         self.campo_focado_wifi = campo
-        self.input_ssid.setStyleSheet("background-color: white; border: 1px solid #777; border-radius: 4px; padding: 2px 5px;")
-        self.input_senha.setStyleSheet("background-color: white; border: 1px solid #777; border-radius: 4px; padding: 2px 5px;")
-        campo.setStyleSheet("background-color: #FFF9C4; border: 2px solid #1565C0; border-radius: 4px; padding: 2px 5px;")
+        style_padrao = "background-color: white; border: 1px solid #777; border-radius: 6px; padding: 2px 8px; font-size: 12pt;"
+        style_foco = "background-color: #FFF9C4; border: 2px solid #1565C0; border-radius: 6px; padding: 2px 8px; font-size: 12pt;"
+        self.input_ssid.setStyleSheet(style_padrao)
+        self.input_senha.setStyleSheet(style_padrao)
+        campo.setStyleSheet(style_foco)
 
     def ao_digitar_teclado(self, valor):
         if not self.campo_focado_wifi:
@@ -840,7 +891,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.mudar_tela(self.tela_status_rede, "SINCRONIZANDO_GIT")
         self.lbl_status_rede_detalhe.setText("Sincronizando checklists com o Git...\nAguarde envio dos arquivos...")
         self.lbl_status_rede_detalhe.setStyleSheet(
-            "color: #1565C0; padding: 15px; border: 2px solid #1565C0; border-radius: 8px; background-color: #E3F2FD;"
+            "color: #1565C0; padding: 15px; border: 2px solid #1565C0; border-radius: 10px; background-color: #E3F2FD;"
         )
         self.container_btn_rede.setEnabled(False)
         threading.Thread(target=self._worker_sincronizar_git, daemon=True).start()
@@ -882,13 +933,13 @@ class SistemaGT(QtWidgets.QMainWindow):
         if sucesso:
             self.lbl_status_rede_detalhe.setText(f"SINCRONIZAÇÃO CONCLUÍDA!\n\n{mensagem}")
             self.lbl_status_rede_detalhe.setStyleSheet(
-                "color: #1B5E20; padding: 15px; border: 2px solid #2E7D32; border-radius: 8px; background-color: #E8F5E9;"
+                "color: #1B5E20; padding: 15px; border: 2px solid #2E7D32; border-radius: 10px; background-color: #E8F5E9;"
             )
             QTimer.singleShot(4000, lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
         else:
             self.lbl_status_rede_detalhe.setText(f"FALHA NA SINCRONIZAÇÃO GIT\n\n{mensagem}")
             self.lbl_status_rede_detalhe.setStyleSheet(
-                "color: #C62828; padding: 15px; border: 2px solid #C62828; border-radius: 8px; background-color: #FFEBEE;"
+                "color: #C62828; padding: 15px; border: 2px solid #C62828; border-radius: 10px; background-color: #FFEBEE;"
             )
 
     # ========================================================================
@@ -898,26 +949,39 @@ class SistemaGT(QtWidgets.QMainWindow):
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout()
         layout.setAlignment(Qt.AlignCenter)
-        layout.setContentsMargins(15, 10, 15, 10)
+        layout.setContentsMargins(15, 12, 15, 12)
+        layout.setSpacing(12)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
         self.lbl_instrucao = QtWidgets.QLabel("Aproxime o seu crachá...")
-        self.lbl_instrucao.setFont(QFont("Arial", 16, QFont.Bold))
+        self.lbl_instrucao.setFont(QFont("Arial", 17, QFont.Bold))
         self.lbl_instrucao.setAlignment(Qt.AlignCenter)
-        self.lbl_instrucao.setStyleSheet("color: #333; margin-top: 10px; margin-bottom: 15px;")
+        self.lbl_instrucao.setStyleSheet("color: #212121; margin-top: 5px; margin-bottom: 10px;")
 
         self.lbl_status = QtWidgets.QLabel("Aguardando leitura do leitor RFID...")
-        self.lbl_status.setFont(QFont("Arial", 14, QFont.Bold))
+        self.lbl_status.setFont(QFont("Arial", 15, QFont.Bold))
         self.lbl_status.setAlignment(Qt.AlignCenter)
+        self.lbl_status.setWordWrap(True)
         self.lbl_status.setStyleSheet(
-            "color: #555; padding: 20px; border: 2px dashed #BDBDBD; border-radius: 10px; background-color: #FFFFFF;")
-        self.lbl_status.setFixedSize(550, 140)
+            "color: #424242; padding: 20px; border: 2px dashed #BDBDBD; border-radius: 12px; background-color: #FFFFFF;"
+        )
+        self.lbl_status.setFixedSize(650, 160)
 
         btn_cancelar = QtWidgets.QPushButton("CANCELAR")
         btn_cancelar.setFont(QFont("Arial", 14, QFont.Bold))
-        btn_cancelar.setFixedSize(220, 48)
-        btn_cancelar.setStyleSheet("background-color: #757575; color: white; border-radius: 6px; margin-top: 15px;")
+        btn_cancelar.setFixedSize(260, 50)
+        btn_cancelar.setStyleSheet("""
+            QPushButton {
+                background-color: #757575;
+                color: white;
+                border-radius: 8px;
+                margin-top: 10px;
+            }
+            QPushButton:pressed {
+                background-color: #424242;
+            }
+        """)
         btn_cancelar.clicked.connect(lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
 
         layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
@@ -932,13 +996,15 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.lbl_instrucao.setText(instrucao)
         self.lbl_status.setText("Aguardando leitura do leitor RFID...")
         self.lbl_status.setStyleSheet(
-            "color: #555; padding: 20px; border: 2px dashed #BDBDBD; border-radius: 10px; background-color: #FFFFFF;")
+            "color: #424242; padding: 20px; border: 2px dashed #BDBDBD; border-radius: 12px; background-color: #FFFFFF;"
+        )
         self.mudar_tela(self.tela_leitura, estado)
 
     def mostrar_mensagem(self, texto, cor_fundo, cor_texto):
         self.lbl_status.setText(texto)
         self.lbl_status.setStyleSheet(
-            f"color: {cor_texto}; padding: 15px; border: 2px solid {cor_fundo}; border-radius: 10px; background-color: {cor_fundo}; font-weight: bold;")
+            f"color: {cor_texto}; padding: 15px; border: 2px solid {cor_fundo}; border-radius: 12px; background-color: {cor_fundo}; font-weight: bold;"
+        )
         QTimer.singleShot(3000, lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
 
     # ========================================================================
@@ -951,8 +1017,8 @@ class SistemaGT(QtWidgets.QMainWindow):
         container.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
 
         layout = QtWidgets.QVBoxLayout(container)
-        layout.setContentsMargins(8, 2, 8, 2)
-        layout.setSpacing(5)
+        layout.setContentsMargins(10, 4, 10, 4)
+        layout.setSpacing(6)
 
         lbl_p = QtWidgets.QLabel(f"{idx_pergunta + 1}. {self.perguntas[idx_pergunta]}")
         lbl_p.setFont(QFont("Arial", 14, QFont.Bold))
@@ -961,20 +1027,22 @@ class SistemaGT(QtWidgets.QMainWindow):
         lbl_p.setStyleSheet("background-color: transparent; color: #111111; padding: 0;")
 
         h_btn = QtWidgets.QHBoxLayout()
-        h_btn.setSpacing(12)
+        h_btn.setSpacing(16)
         h_btn.setAlignment(Qt.AlignCenter)
 
         btn_ok = QtWidgets.QPushButton("OK")
         btn_ok.setFont(QFont("Arial", 14, QFont.Bold))
-        btn_ok.setFixedSize(155, 42)
+        btn_ok.setFixedSize(170, 46)
         btn_ok.setStyleSheet(
-            "background-color: #E8F5E9; color: #2E7D32; border: 2px solid #2E7D32; border-radius: 6px;")
+            "background-color: #E8F5E9; color: #2E7D32; border: 2px solid #2E7D32; border-radius: 8px;"
+        )
 
         btn_nok = QtWidgets.QPushButton("NÃO OK")
         btn_nok.setFont(QFont("Arial", 14, QFont.Bold))
-        btn_nok.setFixedSize(155, 42)
+        btn_nok.setFixedSize(170, 46)
         btn_nok.setStyleSheet(
-            "background-color: #FFEBEE; color: #C62828; border: 2px solid #C62828; border-radius: 6px;")
+            "background-color: #FFEBEE; color: #C62828; border: 2px solid #C62828; border-radius: 8px;"
+        )
 
         btn_ok.clicked.connect(lambda: self.selecionar_resposta(idx_pergunta, "OK", btn_ok, btn_nok))
         btn_nok.clicked.connect(lambda: self.selecionar_resposta(idx_pergunta, "NÃO OK", btn_ok, btn_nok))
@@ -990,26 +1058,30 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.respostas_checklist[idx] = valor
         if valor == "OK":
             btn_ok.setStyleSheet(
-                "background-color: #2E7D32; color: white; border: 2px solid #2E7D32; border-radius: 6px;")
+                "background-color: #2E7D32; color: white; border: 2px solid #2E7D32; border-radius: 8px;"
+            )
             btn_nok.setStyleSheet(
-                "background-color: #FFEBEE; color: #C62828; border: 2px solid #C62828; border-radius: 6px;")
+                "background-color: #FFEBEE; color: #C62828; border: 2px solid #C62828; border-radius: 8px;"
+            )
         else:
             btn_nok.setStyleSheet(
-                "background-color: #C62828; color: white; border: 2px solid #C62828; border-radius: 6px;")
+                "background-color: #C62828; color: white; border: 2px solid #C62828; border-radius: 8px;"
+            )
             btn_ok.setStyleSheet(
-                "background-color: #E8F5E9; color: #2E7D32; border: 2px solid #2E7D32; border-radius: 6px;")
+                "background-color: #E8F5E9; color: #2E7D32; border: 2px solid #2E7D32; border-radius: 8px;"
+            )
 
     def criar_tela_par_perguntas(self, idx1, idx2):
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(tela)
-        layout.setContentsMargins(12, 4, 12, 4)
-        layout.setSpacing(3)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(4)
         layout.setAlignment(Qt.AlignCenter)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
         header = QtWidgets.QLabel("CHECKLIST DE SEGURANÇA")
-        header.setFont(QFont("Arial", 13, QFont.Bold))
+        header.setFont(QFont("Arial", 14, QFont.Bold))
         header.setAlignment(Qt.AlignCenter)
         header.setStyleSheet("color: #1A237E; background-color: transparent;")
 
@@ -1017,12 +1089,24 @@ class SistemaGT(QtWidgets.QMainWindow):
         bloco2 = self.criar_bloco_pergunta(idx2)
 
         botoes_nav = QtWidgets.QHBoxLayout()
-        botoes_nav.setSpacing(8)
+        botoes_nav.setSpacing(12)
+
+        style_btn_nav = """
+            QPushButton {{
+                background-color: {cor};
+                color: white;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 13pt;
+            }}
+            QPushButton:pressed {{
+                background-color: {cor_press};
+            }}
+        """
 
         btn_voltar = QtWidgets.QPushButton("◄ ANTERIOR")
-        btn_voltar.setFont(QFont("Arial", 12, QFont.Bold))
-        btn_voltar.setFixedHeight(42)
-        btn_voltar.setStyleSheet("background-color: #757575; color: white; border-radius: 6px;")
+        btn_voltar.setFixedHeight(46)
+        btn_voltar.setStyleSheet(style_btn_nav.format(cor="#757575", cor_press="#424242"))
 
         idx_tela_atual = idx1 // 2
         if idx_tela_atual == 0:
@@ -1032,9 +1116,8 @@ class SistemaGT(QtWidgets.QMainWindow):
                                                                f"CHK_PAG_{idx_tela_atual - 1}"))
 
         btn_proximo = QtWidgets.QPushButton("PRÓXIMO ►")
-        btn_proximo.setFont(QFont("Arial", 12, QFont.Bold))
-        btn_proximo.setFixedHeight(42)
-        btn_proximo.setStyleSheet("background-color: #1565C0; color: white; border-radius: 6px;")
+        btn_proximo.setFixedHeight(46)
+        btn_proximo.setStyleSheet(style_btn_nav.format(cor="#1565C0", cor_press="#0D47A1"))
         btn_proximo.clicked.connect(lambda: self.validar_e_avancar_pagina(idx_tela_atual))
 
         botoes_nav.addWidget(btn_voltar)
@@ -1053,33 +1136,44 @@ class SistemaGT(QtWidgets.QMainWindow):
     def criar_tela_pergunta_final(self, idx_pergunta):
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(tela)
-        layout.setContentsMargins(12, 4, 12, 4)
-        layout.setSpacing(5)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(6)
         layout.setAlignment(Qt.AlignCenter)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
         header = QtWidgets.QLabel("CHECKLIST DE SEGURANÇA - FINALIZAÇÃO")
-        header.setFont(QFont("Arial", 13, QFont.Bold))
+        header.setFont(QFont("Arial", 14, QFont.Bold))
         header.setAlignment(Qt.AlignCenter)
         header.setStyleSheet("color: #1A237E; background-color: transparent;")
 
         bloco1 = self.criar_bloco_pergunta(idx_pergunta)
 
         botoes_nav = QtWidgets.QHBoxLayout()
-        botoes_nav.setSpacing(8)
+        botoes_nav.setSpacing(12)
+
+        style_btn_nav = """
+            QPushButton {{
+                background-color: {cor};
+                color: white;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 13pt;
+            }}
+            QPushButton:pressed {{
+                background-color: {cor_press};
+            }}
+        """
 
         btn_voltar = QtWidgets.QPushButton("◄ ANTERIOR")
-        btn_voltar.setFont(QFont("Arial", 12, QFont.Bold))
-        btn_voltar.setFixedHeight(42)
-        btn_voltar.setStyleSheet("background-color: #757575; color: white; border-radius: 6px;")
+        btn_voltar.setFixedHeight(46)
+        btn_voltar.setStyleSheet(style_btn_nav.format(cor="#757575", cor_press="#424242"))
         btn_voltar.clicked.connect(lambda: self.mudar_tela(self.telas_checklist_perguntas[4], "CHK_PAG_4"))
 
         btn_concluir = QtWidgets.QPushButton("CONCLUIR CHECKLIST")
         self.btn_concluir_checklist = btn_concluir
-        btn_concluir.setFont(QFont("Arial", 12, QFont.Bold))
-        btn_concluir.setFixedHeight(42)
-        btn_concluir.setStyleSheet("background-color: #2E7D32; color: white; border-radius: 6px;")
+        btn_concluir.setFixedHeight(46)
+        btn_concluir.setStyleSheet(style_btn_nav.format(cor="#2E7D32", cor_press="#1B5E20"))
         btn_concluir.clicked.connect(self.processar_finalizacao_checklist)
 
         botoes_nav.addWidget(btn_voltar)
@@ -1110,32 +1204,35 @@ class SistemaGT(QtWidgets.QMainWindow):
         widget = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(widget)
         layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(10)
+        layout.setSpacing(12)
+        layout.setAlignment(Qt.AlignCenter)
 
         lbl_titulo = QtWidgets.QLabel("EQUIPAMENTO LIBERADO")
-        lbl_titulo.setFont(QFont("Arial", 16, QFont.Bold))
+        lbl_titulo.setFont(QFont("Arial", 18, QFont.Bold))
         lbl_titulo.setAlignment(Qt.AlignCenter)
         lbl_titulo.setStyleSheet("color: #2E7D32;")
 
         self.lbl_msg_aprovado = QtWidgets.QLabel("Checklist Aprovado com Sucesso!")
-        self.lbl_msg_aprovado.setFont(QFont("Arial", 12))
+        self.lbl_msg_aprovado.setFont(QFont("Arial", 14, QFont.Bold))
         self.lbl_msg_aprovado.setAlignment(Qt.AlignCenter)
         self.lbl_msg_aprovado.setWordWrap(True)
 
         self.lbl_tempo_restante = QtWidgets.QLabel("03:00")
-        self.lbl_tempo_restante.setFont(QFont("Arial", 28, QFont.Bold))
+        self.lbl_tempo_restante.setFont(QFont("Arial", 32, QFont.Bold))
         self.lbl_tempo_restante.setAlignment(Qt.AlignCenter)
         self.lbl_tempo_restante.setStyleSheet(
-            "color: #1B5E20; background-color: #E8F5E9; border-radius: 8px; padding: 10px;")
+            "color: #1B5E20; background-color: #E8F5E9; border: 2px solid #2E7D32; border-radius: 12px; padding: 12px 24px;"
+        )
 
         btn_voltar_menu = QtWidgets.QPushButton("Voltar ao Menu Principal")
-        btn_voltar_menu.setFont(QFont("Arial", 11, QFont.Bold))
-        btn_voltar_menu.setFixedHeight(45)
+        btn_voltar_menu.setFont(QFont("Arial", 13, QFont.Bold))
+        btn_voltar_menu.setFixedHeight(48)
+        btn_voltar_menu.setFixedWidth(400)
         btn_voltar_menu.setStyleSheet("""
             QPushButton {
                 background-color: #0288D1;
                 color: white;
-                border-radius: 6px;
+                border-radius: 8px;
             }
             QPushButton:pressed {
                 background-color: #01579B;
@@ -1143,10 +1240,10 @@ class SistemaGT(QtWidgets.QMainWindow):
         """)
         btn_voltar_menu.clicked.connect(self.finalizar_tempo_liberacao)
 
-        layout.addWidget(lbl_titulo)
-        layout.addWidget(self.lbl_msg_aprovado)
-        layout.addWidget(self.lbl_tempo_restante)
-        layout.addWidget(btn_voltar_menu)
+        layout.addWidget(lbl_titulo, alignment=Qt.AlignCenter)
+        layout.addWidget(self.lbl_msg_aprovado, alignment=Qt.AlignCenter)
+        layout.addWidget(self.lbl_tempo_restante, alignment=Qt.AlignCenter)
+        layout.addWidget(btn_voltar_menu, alignment=Qt.AlignCenter)
 
         return widget
 
@@ -1156,17 +1253,17 @@ class SistemaGT(QtWidgets.QMainWindow):
 
         layout = QtWidgets.QVBoxLayout()
         layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(15)
+        layout.setSpacing(18)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
         lbl_msg = QtWidgets.QLabel("Checklist Reprovado\nContate a Segurança / Manutenção")
-        lbl_msg.setFont(QFont("Arial", 18, QFont.Bold))
+        lbl_msg.setFont(QFont("Arial", 20, QFont.Bold))
         lbl_msg.setStyleSheet("color: white;")
         lbl_msg.setAlignment(Qt.AlignCenter)
 
-        lbl_trava = QtWidgets.QLabel("SISTEMA BLOQUEADO\nAproxime o Crachá Mestre para desbloquear")
-        lbl_trava.setFont(QFont("Arial", 14, QFont.Bold))
+        lbl_trava = QtWidgets.QLabel("SISTEMA BLOQUEADO\nAproxime o Crachá MESTRE para desbloquear")
+        lbl_trava.setFont(QFont("Arial", 15, QFont.Bold))
         lbl_trava.setStyleSheet("color: #FFEBEE;")
         lbl_trava.setAlignment(Qt.AlignCenter)
 
@@ -1223,10 +1320,12 @@ class SistemaGT(QtWidgets.QMainWindow):
             for btn in tela.findChildren(QtWidgets.QPushButton):
                 if btn.text() == "OK":
                     btn.setStyleSheet(
-                        "background-color: #E8F5E9; color: #2E7D32; border: 2px solid #2E7D32; border-radius: 6px;")
+                        "background-color: #E8F5E9; color: #2E7D32; border: 2px solid #2E7D32; border-radius: 8px;"
+                    )
                 elif btn.text() == "NÃO OK":
                     btn.setStyleSheet(
-                        "background-color: #FFEBEE; color: #C62828; border: 2px solid #C62828; border-radius: 6px;")
+                        "background-color: #FFEBEE; color: #C62828; border: 2px solid #C62828; border-radius: 8px;"
+                    )
 
         self.mudar_tela(self.telas_checklist_perguntas[0], "CHK_PAG_0")
 
@@ -1387,7 +1486,8 @@ class SistemaGT(QtWidgets.QMainWindow):
                 self.lbl_instrucao.setText("Aproxime o crachá do USUÁRIO")
                 self.lbl_status.setText("✓ Mestre Autorizado!\n\nRetire o crachá mestre e aproxime o do Usuário...")
                 self.lbl_status.setStyleSheet(
-                    "color: #1B5E20; padding: 15px; border: 2px solid #2E7D32; border-radius: 10px; font-weight: bold; background-color: #E8F5E9;")
+                    "color: #1B5E20; padding: 15px; border: 2px solid #2E7D32; border-radius: 12px; font-weight: bold; background-color: #E8F5E9;"
+                )
             else:
                 self.mostrar_mensagem("ERRO\n\nCrachá não é Mestre!", "#C62828", "white")
 
@@ -1412,7 +1512,8 @@ class SistemaGT(QtWidgets.QMainWindow):
                 self.lbl_instrucao.setText("Aproxime o crachá do USUÁRIO")
                 self.lbl_status.setText("✓ Mestre Autorizado!\n\nRetire o crachá mestre e aproxime o do Usuário...")
                 self.lbl_status.setStyleSheet(
-                    "color: #1B5E20; padding: 15px; border: 2px solid #2E7D32; border-radius: 10px; font-weight: bold; background-color: #E8F5E9;")
+                    "color: #1B5E20; padding: 15px; border: 2px solid #2E7D32; border-radius: 12px; font-weight: bold; background-color: #E8F5E9;"
+                )
             else:
                 self.mostrar_mensagem("ERRO\n\nCrachá não é Mestre!", "#C62828", "white")
 
