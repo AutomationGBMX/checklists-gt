@@ -28,7 +28,7 @@ from PyQt5.QtCore import pyqtSignal, pyqtSlot, QObject, Qt, QTimer
 # ============================================================================
 # CONFIGURAÇÕES E GPIO
 # ============================================================================
-UID_MESTRE = "3293600699"
+UID_MESTRE = "786538887"
 
 PASTA_CHECKLISTS = os.path.abspath("./checklists")
 TEMPO_LIBERACAO_SEGUNDOS = 180
