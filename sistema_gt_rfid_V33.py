@@ -3,8 +3,7 @@
 """
 Sistema Completo de Controle de Acesso GBMX e Checklist de Segurança - Liberar GT
 Otimizado para Tela Raspberry Pi de 5 Polegadas (800x480)
-Versão 34 - Com Configuração Persistente de Tempo e Correção de Conexão Wi-Fi
-07/10/2026
+Versão 35 - Interface Visual Reformulada (Fontes e Botões Ampliados)
 """
 
 import sys
@@ -612,29 +611,29 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.central_widget.setCurrentWidget(tela)
 
     # ========================================================================
-    # TELA INICIAL
+    # TELA INICIAL (AMPLIADA E OTIMIZADA PARA TOUCH)
     # ========================================================================
     def criar_tela_menu_liberar_gt(self):
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout()
         layout.setAlignment(Qt.AlignCenter)
-        layout.setContentsMargins(15, 6, 15, 6)
-        layout.setSpacing(6)
+        layout.setContentsMargins(15, 8, 15, 8)
+        layout.setSpacing(8)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
         titulo = QtWidgets.QLabel("MENU - LIBERAR GT")
-        titulo.setFont(QFont("Arial", 17, QFont.Bold))
+        titulo.setFont(QFont("Arial", 20, QFont.Bold))
         titulo.setAlignment(Qt.AlignCenter)
-        titulo.setStyleSheet("color: #212121; margin-top: 1px; margin-bottom: 2px;")
+        titulo.setStyleSheet("color: #1A237E; margin-top: 2px; margin-bottom: 4px;")
 
         btn_style_base = """
             QPushButton {{
                 background-color: {cor};
                 color: white;
-                border-radius: 8px;
+                border-radius: 10px;
                 font-weight: bold;
-                font-size: 13pt;
+                font-size: 16pt;
             }}
             QPushButton:pressed {{
                 background-color: {cor_press};
@@ -642,30 +641,30 @@ class SistemaGT(QtWidgets.QMainWindow):
         """
 
         btn_liberar = QtWidgets.QPushButton("1 - LIBERAR EQUIPAMENTO")
-        btn_liberar.setFixedSize(540, 44)
+        btn_liberar.setFixedSize(720, 54)
         btn_liberar.setStyleSheet(btn_style_base.format(cor="#2E7D32", cor_press="#1B5E20"))
         btn_liberar.clicked.connect(
             lambda: self.preparar_leitura("LIBERAR_EQUIPAMENTO", "Aproxime o crachá para LIBERAR O EQUIPAMENTO"))
 
         btn_habilitar = QtWidgets.QPushButton("2 - HABILITAR USUÁRIO")
-        btn_habilitar.setFixedSize(540, 44)
+        btn_habilitar.setFixedSize(720, 54)
         btn_habilitar.setStyleSheet(btn_style_base.format(cor="#1565C0", cor_press="#0D47A1"))
         btn_habilitar.clicked.connect(
             lambda: self.preparar_leitura("HABILITAR_USUARIO_MESTRE", "Aproxime o CRACHÁ MESTRE para autorizar"))
 
         btn_desabilitar = QtWidgets.QPushButton("3 - DESABILITAR USUÁRIO")
-        btn_desabilitar.setFixedSize(540, 44)
+        btn_desabilitar.setFixedSize(720, 54)
         btn_desabilitar.setStyleSheet(btn_style_base.format(cor="#C62828", cor_press="#8E0000"))
         btn_desabilitar.clicked.connect(
             lambda: self.preparar_leitura("DESABILITAR_USUARIO_MESTRE", "Aproxime o CRACHÁ MESTRE para autorizar"))
 
         btn_git = QtWidgets.QPushButton("4 - SINCRONIZAR CHECKLISTS (GIT)")
-        btn_git.setFixedSize(540, 44)
+        btn_git.setFixedSize(720, 54)
         btn_git.setStyleSheet(btn_style_base.format(cor="#E65100", cor_press="#BF360C"))
         btn_git.clicked.connect(self.ao_clicar_opcao_git)
 
         btn_config = QtWidgets.QPushButton("5 - CONFIGURAÇÕES")
-        btn_config.setFixedSize(540, 44)
+        btn_config.setFixedSize(720, 54)
         btn_config.setStyleSheet(btn_style_base.format(cor="#4A148C", cor_press="#311B92"))
         btn_config.clicked.connect(
             lambda: self.preparar_leitura("CONFIGURACOES_MESTRE", "Aproxime o CRACHÁ MESTRE para acessar as Configurações"))
@@ -1164,7 +1163,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         QTimer.singleShot(3000, lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
 
     # ========================================================================
-    # CHECKLIST (OTIMIZADO PARA MÁXIMA VISIBILIDADE E LEITURA EM TOUCH)
+    # CHECKLIST (AMPLIADO E OTIMIZADO PARA TOUCHSCREEN 800x480)
     # ========================================================================
     def criar_bloco_pergunta(self, idx_pergunta):
         container = QtWidgets.QFrame()
@@ -1172,38 +1171,38 @@ class SistemaGT(QtWidgets.QMainWindow):
             QFrame {
                 background-color: #FFFFFF;
                 border: 2px solid #CFD8DC;
-                border-radius: 10px;
+                border-radius: 12px;
             }
         """)
         container.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
 
         layout = QtWidgets.QVBoxLayout(container)
-        layout.setContentsMargins(10, 6, 10, 6)
-        layout.setSpacing(4)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(6)
 
-        # Pergunta com fonte ampliada para 16pt Bold, alinhamento à esquerda e quebra em várias linhas
+        # Pergunta com fonte ampliada para 17pt Bold, alinhamento à esquerda e quebra de linha automática
         lbl_p = QtWidgets.QLabel(f"{idx_pergunta + 1}. {self.perguntas[idx_pergunta]}")
-        lbl_p.setFont(QFont("Arial", 16, QFont.Bold))
+        lbl_p.setFont(QFont("Arial", 17, QFont.Bold))
         lbl_p.setWordWrap(True)
         lbl_p.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        lbl_p.setStyleSheet("background-color: transparent; color: #000000; border: none; padding: 0px;")
+        lbl_p.setStyleSheet("background-color: transparent; color: #000000; border: none; padding: 2px;")
 
         h_btn = QtWidgets.QHBoxLayout()
-        h_btn.setSpacing(16)
+        h_btn.setSpacing(20)
         h_btn.setAlignment(Qt.AlignCenter)
 
         btn_ok = QtWidgets.QPushButton("OK")
-        btn_ok.setFont(QFont("Arial", 15, QFont.Bold))
-        btn_ok.setFixedSize(170, 42)
+        btn_ok.setFont(QFont("Arial", 16, QFont.Bold))
+        btn_ok.setFixedSize(220, 48)
         btn_ok.setStyleSheet(
-            "background-color: #E8F5E9; color: #2E7D32; border: 2px solid #2E7D32; border-radius: 8px;"
+            "background-color: #E8F5E9; color: #1B5E20; border: 2px solid #2E7D32; border-radius: 8px; font-weight: bold; font-size: 16pt;"
         )
 
         btn_nok = QtWidgets.QPushButton("NÃO OK")
-        btn_nok.setFont(QFont("Arial", 15, QFont.Bold))
-        btn_nok.setFixedSize(170, 42)
+        btn_nok.setFont(QFont("Arial", 16, QFont.Bold))
+        btn_nok.setFixedSize(220, 48)
         btn_nok.setStyleSheet(
-            "background-color: #FFEBEE; color: #C62828; border: 2px solid #C62828; border-radius: 8px;"
+            "background-color: #FFEBEE; color: #B71C1C; border: 2px solid #C62828; border-radius: 8px; font-weight: bold; font-size: 16pt;"
         )
 
         btn_ok.clicked.connect(lambda: self.selecionar_resposta(idx_pergunta, "OK", btn_ok, btn_nok))
@@ -1220,29 +1219,29 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.respostas_checklist[idx] = valor
         if valor == "OK":
             btn_ok.setStyleSheet(
-                "background-color: #2E7D32; color: white; border: 2px solid #2E7D32; border-radius: 8px;"
+                "background-color: #2E7D32; color: white; border: 2px solid #1B5E20; border-radius: 8px; font-weight: bold; font-size: 16pt;"
             )
             btn_nok.setStyleSheet(
-                "background-color: #FFEBEE; color: #C62828; border: 2px solid #C62828; border-radius: 8px;"
+                "background-color: #FFEBEE; color: #B71C1C; border: 2px solid #C62828; border-radius: 8px; font-weight: bold; font-size: 16pt;"
             )
         else:
             btn_nok.setStyleSheet(
-                "background-color: #C62828; color: white; border: 2px solid #C62828; border-radius: 8px;"
+                "background-color: #C62828; color: white; border: 2px solid #8E0000; border-radius: 8px; font-weight: bold; font-size: 16pt;"
             )
             btn_ok.setStyleSheet(
-                "background-color: #E8F5E9; color: #2E7D32; border: 2px solid #2E7D32; border-radius: 8px;"
+                "background-color: #E8F5E9; color: #1B5E20; border: 2px solid #2E7D32; border-radius: 8px; font-weight: bold; font-size: 16pt;"
             )
 
     def criar_tela_par_perguntas(self, idx1, idx2):
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(tela)
-        layout.setContentsMargins(8, 2, 8, 4)
-        layout.setSpacing(4)
+        layout.setContentsMargins(10, 4, 10, 6)
+        layout.setSpacing(6)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
         header = QtWidgets.QLabel("CHECKLIST DE SEGURANÇA")
-        header.setFont(QFont("Arial", 12, QFont.Bold))
+        header.setFont(QFont("Arial", 13, QFont.Bold))
         header.setAlignment(Qt.AlignCenter)
         header.setStyleSheet("color: #1A237E; background-color: transparent; margin: 0px; padding: 0px;")
 
@@ -1250,7 +1249,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         bloco2 = self.criar_bloco_pergunta(idx2)
 
         botoes_nav = QtWidgets.QHBoxLayout()
-        botoes_nav.setSpacing(12)
+        botoes_nav.setSpacing(14)
 
         style_btn_nav = """
             QPushButton {{
@@ -1258,7 +1257,7 @@ class SistemaGT(QtWidgets.QMainWindow):
                 color: white;
                 border-radius: 8px;
                 font-weight: bold;
-                font-size: 14pt;
+                font-size: 15pt;
             }}
             QPushButton:pressed {{
                 background-color: {cor_press};
@@ -1266,7 +1265,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         """
 
         btn_voltar = QtWidgets.QPushButton("◄ ANTERIOR")
-        btn_voltar.setFixedHeight(44)
+        btn_voltar.setFixedHeight(48)
         btn_voltar.setStyleSheet(style_btn_nav.format(cor="#757575", cor_press="#424242"))
 
         idx_tela_atual = idx1 // 2
@@ -1277,7 +1276,7 @@ class SistemaGT(QtWidgets.QMainWindow):
                                                                f"CHK_PAG_{idx_tela_atual - 1}"))
 
         btn_proximo = QtWidgets.QPushButton("PRÓXIMO ►")
-        btn_proximo.setFixedHeight(44)
+        btn_proximo.setFixedHeight(48)
         btn_proximo.setStyleSheet(style_btn_nav.format(cor="#1565C0", cor_press="#0D47A1"))
         btn_proximo.clicked.connect(lambda: self.validar_e_avancar_pagina(idx_tela_atual))
 
@@ -1294,20 +1293,20 @@ class SistemaGT(QtWidgets.QMainWindow):
     def criar_tela_pergunta_final(self, idx_pergunta):
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(tela)
-        layout.setContentsMargins(8, 2, 8, 4)
-        layout.setSpacing(4)
+        layout.setContentsMargins(10, 4, 10, 6)
+        layout.setSpacing(6)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
         header = QtWidgets.QLabel("CHECKLIST DE SEGURANÇA - FINALIZAÇÃO")
-        header.setFont(QFont("Arial", 12, QFont.Bold))
+        header.setFont(QFont("Arial", 13, QFont.Bold))
         header.setAlignment(Qt.AlignCenter)
         header.setStyleSheet("color: #1A237E; background-color: transparent; margin: 0px; padding: 0px;")
 
         bloco1 = self.criar_bloco_pergunta(idx_pergunta)
 
         botoes_nav = QtWidgets.QHBoxLayout()
-        botoes_nav.setSpacing(12)
+        botoes_nav.setSpacing(14)
 
         style_btn_nav = """
             QPushButton {{
@@ -1315,7 +1314,7 @@ class SistemaGT(QtWidgets.QMainWindow):
                 color: white;
                 border-radius: 8px;
                 font-weight: bold;
-                font-size: 14pt;
+                font-size: 15pt;
             }}
             QPushButton:pressed {{
                 background-color: {cor_press};
@@ -1323,13 +1322,13 @@ class SistemaGT(QtWidgets.QMainWindow):
         """
 
         btn_voltar = QtWidgets.QPushButton("◄ ANTERIOR")
-        btn_voltar.setFixedHeight(44)
+        btn_voltar.setFixedHeight(48)
         btn_voltar.setStyleSheet(style_btn_nav.format(cor="#757575", cor_press="#424242"))
         btn_voltar.clicked.connect(lambda: self.mudar_tela(self.telas_checklist_perguntas[4], "CHK_PAG_4"))
 
         btn_concluir = QtWidgets.QPushButton("CONCLUIR CHECKLIST")
         self.btn_concluir_checklist = btn_concluir
-        btn_concluir.setFixedHeight(44)
+        btn_concluir.setFixedHeight(48)
         btn_concluir.setStyleSheet(style_btn_nav.format(cor="#2E7D32", cor_press="#1B5E20"))
         btn_concluir.clicked.connect(self.processar_finalizacao_checklist)
 
@@ -1475,11 +1474,11 @@ class SistemaGT(QtWidgets.QMainWindow):
             for btn in tela.findChildren(QtWidgets.QPushButton):
                 if btn.text() == "OK":
                     btn.setStyleSheet(
-                        "background-color: #E8F5E9; color: #2E7D32; border: 2px solid #2E7D32; border-radius: 8px;"
+                        "background-color: #E8F5E9; color: #1B5E20; border: 2px solid #2E7D32; border-radius: 8px; font-weight: bold; font-size: 16pt;"
                     )
                 elif btn.text() == "NÃO OK":
                     btn.setStyleSheet(
-                        "background-color: #FFEBEE; color: #C62828; border: 2px solid #C62828; border-radius: 8px;"
+                        "background-color: #FFEBEE; color: #B71C1C; border: 2px solid #C62828; border-radius: 8px; font-weight: bold; font-size: 16pt;"
                     )
 
         self.mudar_tela(self.telas_checklist_perguntas[0], "CHK_PAG_0")
