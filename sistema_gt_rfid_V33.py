@@ -3,12 +3,13 @@
 """
 Sistema Completo de Controle de Acesso GBMX e Checklist de Segurança - Liberar GT
 Otimizado para Tela Raspberry Pi de 5 Polegadas (800x480)
-Versão 33 - Interface Visual Aprimorada para Touchscreen (Checklist Otimizado)
-Com Diagnóstico de Rede Assíncrono e Interface Não-Bloqueante
+Versão 34 - Com Configuração Persistente de Tempo e Correção de Conexão Wi-Fi
+07/10/2026
 """
 
 import sys
 import os
+import json
 import socket
 import threading
 import time
@@ -31,7 +32,8 @@ from PyQt5.QtCore import pyqtSignal, pyqtSlot, QObject, Qt, QTimer
 UID_MESTRE = "786538887"
 
 PASTA_CHECKLISTS = os.path.abspath("./checklists")
-TEMPO_LIBERACAO_SEGUNDOS = 180
+ARQUIVO_CONFIG = os.path.abspath("./configuracoes.json")
+TEMPO_LIBERACAO_SEGUNDOS_PADRAO = 180
 
 # Inicialização de Hardware GPIO
 try:
@@ -89,14 +91,39 @@ def obter_wifi_ssid():
 
 
 def conectar_wifi_nmcli(ssid, senha):
-    """Tenta conectar à rede Wi-Fi/Hotspot via nmcli no Linux/Raspberry Pi"""
+    """Tenta conectar à rede Wi-Fi/Hotspot via nmcli no Linux/Raspberry Pi com correção de key-mgmt"""
     try:
         subprocess.run(["nmcli", "radio", "wifi", "on"], capture_output=True, timeout=5)
-        cmd = ["nmcli", "dev", "wifi", "connect", ssid, "password", senha]
+        # Deleta perfil existente com o mesmo SSID para evitar erros de propriedade de segurança corrompida
+        subprocess.run(["nmcli", "connection", "delete", "id", ssid], capture_output=True, timeout=5)
+
+        if senha:
+            cmd = ["nmcli", "dev", "wifi", "connect", ssid, "password", senha]
+        else:
+            cmd = ["nmcli", "dev", "wifi", "connect", ssid]
+
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
         if res.returncode == 0 or "successfully activated" in res.stdout.lower():
             return True, "Conectado com sucesso!"
         else:
+            # Tratamento explícito para erro de key-mgmt do NetworkManager
+            if "key-mgmt" in res.stderr.lower() or "key-mgmt" in res.stdout.lower():
+                subprocess.run(["nmcli", "connection", "delete", "id", ssid], capture_output=True, timeout=5)
+                if senha:
+                    cmd_add = [
+                        "nmcli", "con", "add", "type", "wifi", "con-name", ssid,
+                        "ssid", ssid, "wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", senha
+                    ]
+                else:
+                    cmd_add = [
+                        "nmcli", "con", "add", "type", "wifi", "con-name", ssid,
+                        "ssid", ssid
+                    ]
+                subprocess.run(cmd_add, capture_output=True, text=True, timeout=10)
+                res_up = subprocess.run(["nmcli", "con", "up", "id", ssid], capture_output=True, text=True, timeout=15)
+                if res_up.returncode == 0 or "successfully activated" in res_up.stdout.lower():
+                    return True, "Conectado com sucesso!"
+
             msg_erro = res.stderr.strip() if res.stderr.strip() else res.stdout.strip()
             return False, f"Falha na conexão: {msg_erro[:60]}"
     except subprocess.TimeoutExpired:
@@ -395,6 +422,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         super().__init__()
 
         self.dados = GerenciadorDados()
+        self.carregar_configuracao()
 
         self.labels_data_hora = []
         self.checklists_aprovados_turno = {}
@@ -450,6 +478,30 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.campo_focado_wifi = None
         self.configurar_interface()
         self.atualizar_relogio()
+
+    def carregar_configuracao(self):
+        """Carrega o tempo de liberação configurado a partir de um arquivo JSON local."""
+        self.tempo_liberacao_segundos = TEMPO_LIBERACAO_SEGUNDOS_PADRAO
+        try:
+            if os.path.exists(ARQUIVO_CONFIG):
+                with open(ARQUIVO_CONFIG, 'r', encoding='utf-8') as f:
+                    cfg = json.load(f)
+                    self.tempo_liberacao_segundos = int(cfg.get('tempo_liberacao', TEMPO_LIBERACAO_SEGUNDOS_PADRAO))
+                    print(f"✓ Configuração carregada: Tempo de Liberação = {self.tempo_liberacao_segundos}s")
+        except Exception as e:
+            print(f"[CONFIG] Erro ao carregar configuracao: {e}")
+
+    def salvar_configuracao(self, novo_tempo_segundos):
+        """Salva persistentemente o novo tempo de liberação no arquivo JSON."""
+        try:
+            self.tempo_liberacao_segundos = int(novo_tempo_segundos)
+            with open(ARQUIVO_CONFIG, 'w', encoding='utf-8') as f:
+                json.dump({'tempo_liberacao': self.tempo_liberacao_segundos}, f, indent=4)
+            print(f"✓ Nova configuração salva: Tempo de Liberação = {self.tempo_liberacao_segundos}s")
+            return True
+        except Exception as e:
+            print(f"[CONFIG] Erro ao salvar configuracao: {e}")
+            return False
 
     def obter_texto_turno_atual(self):
         hora = datetime.now().hour
@@ -522,6 +574,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.tela_leitura = self.criar_tela_leitura()
         self.tela_wifi = self.criar_tela_wifi()
         self.tela_status_rede = self.criar_tela_status_rede()
+        self.tela_configuracoes = self.criar_tela_configuracoes()
 
         self.telas_checklist_perguntas = [
             self.criar_tela_par_perguntas(0, 1),
@@ -541,6 +594,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.central_widget.addWidget(self.tela_leitura)
         self.central_widget.addWidget(self.tela_wifi)
         self.central_widget.addWidget(self.tela_status_rede)
+        self.central_widget.addWidget(self.tela_configuracoes)
         for t in self.telas_checklist_perguntas:
             self.central_widget.addWidget(t)
         self.central_widget.addWidget(self.tela_aprovado)
@@ -564,15 +618,15 @@ class SistemaGT(QtWidgets.QMainWindow):
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout()
         layout.setAlignment(Qt.AlignCenter)
-        layout.setContentsMargins(15, 10, 15, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(15, 6, 15, 6)
+        layout.setSpacing(6)
 
         lbl_hdr = self.criar_widget_cabecalho()
 
         titulo = QtWidgets.QLabel("MENU - LIBERAR GT")
-        titulo.setFont(QFont("Arial", 18, QFont.Bold))
+        titulo.setFont(QFont("Arial", 17, QFont.Bold))
         titulo.setAlignment(Qt.AlignCenter)
-        titulo.setStyleSheet("color: #212121; margin-top: 2px; margin-bottom: 4px;")
+        titulo.setStyleSheet("color: #212121; margin-top: 1px; margin-bottom: 2px;")
 
         btn_style_base = """
             QPushButton {{
@@ -580,7 +634,7 @@ class SistemaGT(QtWidgets.QMainWindow):
                 color: white;
                 border-radius: 8px;
                 font-weight: bold;
-                font-size: 14pt;
+                font-size: 13pt;
             }}
             QPushButton:pressed {{
                 background-color: {cor_press};
@@ -588,27 +642,33 @@ class SistemaGT(QtWidgets.QMainWindow):
         """
 
         btn_liberar = QtWidgets.QPushButton("1 - LIBERAR EQUIPAMENTO")
-        btn_liberar.setFixedSize(540, 52)
+        btn_liberar.setFixedSize(540, 44)
         btn_liberar.setStyleSheet(btn_style_base.format(cor="#2E7D32", cor_press="#1B5E20"))
         btn_liberar.clicked.connect(
             lambda: self.preparar_leitura("LIBERAR_EQUIPAMENTO", "Aproxime o crachá para LIBERAR O EQUIPAMENTO"))
 
         btn_habilitar = QtWidgets.QPushButton("2 - HABILITAR USUÁRIO")
-        btn_habilitar.setFixedSize(540, 52)
+        btn_habilitar.setFixedSize(540, 44)
         btn_habilitar.setStyleSheet(btn_style_base.format(cor="#1565C0", cor_press="#0D47A1"))
         btn_habilitar.clicked.connect(
             lambda: self.preparar_leitura("HABILITAR_USUARIO_MESTRE", "Aproxime o CRACHÁ MESTRE para autorizar"))
 
         btn_desabilitar = QtWidgets.QPushButton("3 - DESABILITAR USUÁRIO")
-        btn_desabilitar.setFixedSize(540, 52)
+        btn_desabilitar.setFixedSize(540, 44)
         btn_desabilitar.setStyleSheet(btn_style_base.format(cor="#C62828", cor_press="#8E0000"))
         btn_desabilitar.clicked.connect(
             lambda: self.preparar_leitura("DESABILITAR_USUARIO_MESTRE", "Aproxime o CRACHÁ MESTRE para autorizar"))
 
         btn_git = QtWidgets.QPushButton("4 - SINCRONIZAR CHECKLISTS (GIT)")
-        btn_git.setFixedSize(540, 52)
+        btn_git.setFixedSize(540, 44)
         btn_git.setStyleSheet(btn_style_base.format(cor="#E65100", cor_press="#BF360C"))
         btn_git.clicked.connect(self.ao_clicar_opcao_git)
+
+        btn_config = QtWidgets.QPushButton("5 - CONFIGURAÇÕES")
+        btn_config.setFixedSize(540, 44)
+        btn_config.setStyleSheet(btn_style_base.format(cor="#4A148C", cor_press="#311B92"))
+        btn_config.clicked.connect(
+            lambda: self.preparar_leitura("CONFIGURACOES_MESTRE", "Aproxime o CRACHÁ MESTRE para acessar as Configurações"))
 
         layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
         layout.addWidget(titulo, alignment=Qt.AlignCenter)
@@ -616,9 +676,118 @@ class SistemaGT(QtWidgets.QMainWindow):
         layout.addWidget(btn_habilitar, alignment=Qt.AlignCenter)
         layout.addWidget(btn_desabilitar, alignment=Qt.AlignCenter)
         layout.addWidget(btn_git, alignment=Qt.AlignCenter)
+        layout.addWidget(btn_config, alignment=Qt.AlignCenter)
 
         tela.setLayout(layout)
         return tela
+
+    # ========================================================================
+    # CONFIGURAÇÕES DO SISTEMA (TELA DE TEMPO DE LIBERAÇÃO)
+    # ========================================================================
+    def criar_tela_configuracoes(self):
+        tela = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(tela)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(6)
+
+        lbl_hdr = self.criar_widget_cabecalho()
+
+        titulo = QtWidgets.QLabel("CONFIGURAÇÕES DO SISTEMA")
+        titulo.setFont(QFont("Arial", 15, QFont.Bold))
+        titulo.setAlignment(Qt.AlignCenter)
+        titulo.setStyleSheet("color: #1A237E;")
+
+        self.lbl_config_status = QtWidgets.QLabel()
+        self.lbl_config_status.setFont(QFont("Arial", 13, QFont.Bold))
+        self.lbl_config_status.setAlignment(Qt.AlignCenter)
+        self.lbl_config_status.setStyleSheet("color: #212121;")
+
+        form_layout = QtWidgets.QHBoxLayout()
+        form_layout.setSpacing(10)
+
+        lbl_tempo = QtWidgets.QLabel("Novo tempo (segundos):")
+        lbl_tempo.setFont(QFont("Arial", 12, QFont.Bold))
+
+        self.input_novo_tempo = QtWidgets.QLineEdit()
+        self.input_novo_tempo.setFixedHeight(36)
+        self.input_novo_tempo.setFont(QFont("Arial", 12))
+        self.input_novo_tempo.setStyleSheet("background-color: white; border: 1px solid #777; border-radius: 6px; padding: 2px 8px;")
+
+        form_layout.addWidget(lbl_tempo)
+        form_layout.addWidget(self.input_novo_tempo, 1)
+
+        self.teclado_config = TecladoVirtual()
+        self.teclado_config.tecla_pressionada.connect(self.ao_digitar_teclado_config)
+
+        btn_layout = QtWidgets.QHBoxLayout()
+        btn_layout.setSpacing(12)
+
+        btn_style_nav = """
+            QPushButton {{
+                background-color: {cor};
+                color: white;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 13pt;
+            }}
+            QPushButton:pressed {{
+                background-color: {cor_press};
+            }}
+        """
+
+        btn_salvar = QtWidgets.QPushButton("SALVAR")
+        btn_salvar.setFixedHeight(44)
+        btn_salvar.setStyleSheet(btn_style_nav.format(cor="#2E7D32", cor_press="#1B5E20"))
+        btn_salvar.clicked.connect(self.salvar_novas_configuracoes)
+
+        btn_cancelar = QtWidgets.QPushButton("CANCELAR / VOLTAR")
+        btn_cancelar.setFixedHeight(44)
+        btn_cancelar.setStyleSheet(btn_style_nav.format(cor="#757575", cor_press="#424242"))
+        btn_cancelar.clicked.connect(lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
+
+        btn_layout.addWidget(btn_cancelar)
+        btn_layout.addWidget(btn_salvar)
+
+        layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
+        layout.addWidget(titulo, alignment=Qt.AlignCenter)
+        layout.addWidget(self.lbl_config_status, alignment=Qt.AlignCenter)
+        layout.addLayout(form_layout)
+        layout.addWidget(self.teclado_config)
+        layout.addLayout(btn_layout)
+
+        tela.setLayout(layout)
+        return tela
+
+    def abrir_tela_configuracoes(self):
+        minutos = self.tempo_liberacao_segundos // 60
+        segs = self.tempo_liberacao_segundos % 60
+        str_tempo = f"{self.tempo_liberacao_segundos} seg"
+        if minutos > 0:
+            str_tempo += f" ({minutos} min {segs}s)" if segs else f" ({minutos} min)"
+
+        self.lbl_config_status.setText(f"Tempo de liberação atual: {str_tempo}")
+        self.input_novo_tempo.setText(str(self.tempo_liberacao_segundos))
+        self.mudar_tela(self.tela_configuracoes, "TELA_CONFIGURACOES")
+
+    def ao_digitar_teclado_config(self, valor):
+        if valor == "BACKSPACE":
+            self.input_novo_tempo.setText(self.input_novo_tempo.text()[:-1])
+        elif valor == "CLEAR":
+            self.input_novo_tempo.clear()
+        elif valor.isdigit():
+            self.input_novo_tempo.setText(self.input_novo_tempo.text() + valor)
+
+    def salvar_novas_configuracoes(self):
+        val_str = self.input_novo_tempo.text().strip()
+        if not val_str.isdigit() or int(val_str) <= 0:
+            QtWidgets.QMessageBox.warning(self, "Atenção", "Informe um tempo válido em segundos (inteiro maior que zero).")
+            return
+
+        novo_tempo = int(val_str)
+        if self.salvar_configuracao(novo_tempo):
+            self.mostrar_confirmacao_operacao(f"Tempo de liberação alterado para {novo_tempo} segundos", "#2E7D32")
+        else:
+            self.mostrar_mensagem("ERRO\n\nFalha ao salvar configurações!", "#C62828", "white")
 
     # ========================================================================
     # DIAGNÓSTICO DE REDE E GIT
@@ -1388,12 +1557,12 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.timer_liberacao.stop()
         self.timer_cronometro.stop()
         set_gpios(1)
-        self.fim_liberacao = time.monotonic() + TEMPO_LIBERACAO_SEGUNDOS
+        self.fim_liberacao = time.monotonic() + self.tempo_liberacao_segundos
         self.lbl_msg_aprovado.setText(f"Checklist Aprovado:\n[{matricula}] {nome}")
         self.mudar_tela(self.tela_aprovado, "EQUIPAMENTO_LIBERADO")
         self.atualizar_cronometro_liberacao()
         self.timer_cronometro.start(1000)
-        self.timer_liberacao.start(TEMPO_LIBERACAO_SEGUNDOS * 1000)
+        self.timer_liberacao.start(self.tempo_liberacao_segundos * 1000)
 
     def finalizar_tempo_liberacao(self):
         self.timer_liberacao.stop()
@@ -1444,6 +1613,12 @@ class SistemaGT(QtWidgets.QMainWindow):
         if self.estado_atual == "SINCRONIZAR_GIT_MESTRE":
             if uid_clean == UID_MESTRE:
                 self.iniciar_sincronizacao_git()
+            else:
+                self.mostrar_mensagem("ERRO\n\nCrachá não é Mestre!", "#C62828", "white")
+
+        elif self.estado_atual == "CONFIGURACOES_MESTRE":
+            if uid_clean == UID_MESTRE:
+                self.abrir_tela_configuracoes()
             else:
                 self.mostrar_mensagem("ERRO\n\nCrachá não é Mestre!", "#C62828", "white")
 
