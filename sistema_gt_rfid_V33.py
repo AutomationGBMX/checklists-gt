@@ -3,7 +3,7 @@
 """
 Sistema Completo de Controle de Acesso GBMX e Checklist de Segurança - Liberar GT
 Otimizado para Tela Raspberry Pi de 5 Polegadas (800x480)
-Versão 35 - Interface Visual Reformulada (Fontes e Botões Ampliados)
+Versão 36 - Níveis de Acesso (Mestre Principal, Mestre Nível 2 e Usuário Comum)
 """
 
 import sys
@@ -90,10 +90,9 @@ def obter_wifi_ssid():
 
 
 def conectar_wifi_nmcli(ssid, senha):
-    """Tenta conectar à rede Wi-Fi/Hotspot via nmcli no Linux/Raspberry Pi com correção de key-mgmt"""
+    """Tenta conectar à rede Wi-Fi/Hotspot via nmcli no Linux/Raspberry Pi"""
     try:
         subprocess.run(["nmcli", "radio", "wifi", "on"], capture_output=True, timeout=5)
-        # Deleta perfil existente com o mesmo SSID para evitar erros de propriedade de segurança corrompida
         subprocess.run(["nmcli", "connection", "delete", "id", ssid], capture_output=True, timeout=5)
 
         if senha:
@@ -105,7 +104,6 @@ def conectar_wifi_nmcli(ssid, senha):
         if res.returncode == 0 or "successfully activated" in res.stdout.lower():
             return True, "Conectado com sucesso!"
         else:
-            # Tratamento explícito para erro de key-mgmt do NetworkManager
             if "key-mgmt" in res.stderr.lower() or "key-mgmt" in res.stdout.lower():
                 subprocess.run(["nmcli", "connection", "delete", "id", ssid], capture_output=True, timeout=5)
                 if senha:
@@ -427,6 +425,10 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.checklists_aprovados_turno = {}
 
         self.operador_atual = None
+        self.mestre_n2_atual = None
+        self.msg_temporaria_ate = 0
+        self.origem_voltar_leitura = "TELA_PRINCIPAL"
+
         self.respostas_checklist = {}
         self.finalizacao_em_andamento = False
         self.thread_finalizacao = None
@@ -556,8 +558,30 @@ class SistemaGT(QtWidgets.QMainWindow):
         segundos = int(restante + 0.999999)
         horas, resto = divmod(segundos, 3600)
         minutos, segundos = divmod(resto, 60)
+        str_tempo = f"{horas:02d}:{minutos:02d}:{segundos:02d}"
+
         if hasattr(self, 'lbl_tempo_restante'):
-            self.lbl_tempo_restante.setText(f"{horas:02d}:{minutos:02d}:{segundos:02d}")
+            self.lbl_tempo_restante.setText(str_tempo)
+
+        if hasattr(self, 'lbl_status_main'):
+            if time.time() >= self.msg_temporaria_ate:
+                self.lbl_status_main.setText(
+                    f"EQUIPAMENTO LIBERADO\n\nTempo restante: {str_tempo}\n\nAproxime o crachá para identificar"
+                )
+                self.lbl_status_main.setStyleSheet(
+                    "color: #1B5E20; padding: 15px; border: 3px solid #2E7D32; border-radius: 12px; "
+                    "background-color: #E8F5E9; font-weight: bold;"
+                )
+
+    def mostrar_mensagem_main(self, texto, cor_fundo, cor_texto, duracao_segs=3):
+        """Exibe uma mensagem temporária na tela principal sem interromper o cronômetro ou o relé."""
+        self.msg_temporaria_ate = time.time() + duracao_segs
+        if hasattr(self, 'lbl_status_main'):
+            self.lbl_status_main.setText(texto)
+            self.lbl_status_main.setStyleSheet(
+                f"color: {cor_texto}; padding: 15px; border: 2px solid {cor_fundo}; "
+                f"border-radius: 12px; background-color: {cor_fundo}; font-weight: bold;"
+            )
 
     def configurar_interface(self):
         self.setWindowTitle("SISTEMA GBMX - LIBERAR GT")
@@ -570,6 +594,10 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.setCentralWidget(self.central_widget)
 
         self.tela_liberar_gt = self.criar_tela_menu_liberar_gt()
+        self.tela_menu_mestre_principal = self.criar_tela_menu_mestre_principal()
+        self.tela_menu_mestre_nivel2 = self.criar_tela_menu_mestre_nivel2()
+        self.tela_selecao_nivel_habilitar = self.criar_tela_selecao_nivel_habilitar()
+
         self.tela_leitura = self.criar_tela_leitura()
         self.tela_wifi = self.criar_tela_wifi()
         self.tela_status_rede = self.criar_tela_status_rede()
@@ -590,6 +618,9 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.tela_processando_checklist = self.criar_tela_processando_checklist()
 
         self.central_widget.addWidget(self.tela_liberar_gt)
+        self.central_widget.addWidget(self.tela_menu_mestre_principal)
+        self.central_widget.addWidget(self.tela_menu_mestre_nivel2)
+        self.central_widget.addWidget(self.tela_selecao_nivel_habilitar)
         self.central_widget.addWidget(self.tela_leitura)
         self.central_widget.addWidget(self.tela_wifi)
         self.central_widget.addWidget(self.tela_status_rede)
@@ -602,7 +633,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.central_widget.addWidget(self.tela_processando_checklist)
 
         self.central_widget.setCurrentWidget(self.tela_liberar_gt)
-        self.estado_atual = "MENU_GT"
+        self.estado_atual = "TELA_PRINCIPAL"
 
     def mudar_tela(self, tela, novo_estado):
         self.estado_atual = novo_estado
@@ -611,9 +642,48 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.central_widget.setCurrentWidget(tela)
 
     # ========================================================================
-    # TELA INICIAL (AMPLIADA E OTIMIZADA PARA TOUCH)
+    # TELA PRINCIPAL (REFORMULADA - REQUISITO 1)
     # ========================================================================
     def criar_tela_menu_liberar_gt(self):
+        tela = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout()
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setContentsMargins(15, 12, 15, 12)
+        layout.setSpacing(12)
+
+        lbl_hdr = self.criar_widget_cabecalho()
+
+        titulo = QtWidgets.QLabel("SISTEMA GBMX - CONTROLE DE ACESSO")
+        titulo.setFont(QFont("Arial", 18, QFont.Bold))
+        titulo.setAlignment(Qt.AlignCenter)
+        titulo.setStyleSheet("color: #1A237E;")
+
+        lbl_instrucao = QtWidgets.QLabel("Aproxime o crachá para liberar o equipamento")
+        lbl_instrucao.setFont(QFont("Arial", 17, QFont.Bold))
+        lbl_instrucao.setAlignment(Qt.AlignCenter)
+        lbl_instrucao.setStyleSheet("color: #0D47A1; margin-top: 4px; margin-bottom: 6px;")
+
+        self.lbl_status_main = QtWidgets.QLabel("Aguardando leitura do crachá...")
+        self.lbl_status_main.setFont(QFont("Arial", 16, QFont.Bold))
+        self.lbl_status_main.setAlignment(Qt.AlignCenter)
+        self.lbl_status_main.setWordWrap(True)
+        self.lbl_status_main.setStyleSheet(
+            "color: #424242; padding: 20px; border: 2px dashed #BDBDBD; border-radius: 12px; background-color: #FFFFFF;"
+        )
+        self.lbl_status_main.setFixedSize(720, 180)
+
+        layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
+        layout.addWidget(titulo, alignment=Qt.AlignCenter)
+        layout.addWidget(lbl_instrucao, alignment=Qt.AlignCenter)
+        layout.addWidget(self.lbl_status_main, alignment=Qt.AlignCenter)
+
+        tela.setLayout(layout)
+        return tela
+
+    # ========================================================================
+    # MENU ADMINISTRATIVO - MESTRE PRINCIPAL (REQUISITO 3)
+    # ========================================================================
+    def criar_tela_menu_mestre_principal(self):
         tela = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout()
         layout.setAlignment(Qt.AlignCenter)
@@ -622,12 +692,88 @@ class SistemaGT(QtWidgets.QMainWindow):
 
         lbl_hdr = self.criar_widget_cabecalho()
 
-        titulo = QtWidgets.QLabel("MENU - LIBERAR GT")
-        titulo.setFont(QFont("Arial", 20, QFont.Bold))
+        titulo = QtWidgets.QLabel("MENU ADMINISTRATIVO - MESTRE PRINCIPAL")
+        titulo.setFont(QFont("Arial", 18, QFont.Bold))
         titulo.setAlignment(Qt.AlignCenter)
         titulo.setStyleSheet("color: #1A237E; margin-top: 2px; margin-bottom: 4px;")
 
         btn_style_base = """
+            QPushButton {{
+                background-color: {cor};
+                color: white;
+                border-radius: 10px;
+                font-weight: bold;
+                font-size: 15pt;
+            }}
+            QPushButton:pressed {{
+                background-color: {cor_press};
+            }}
+        """
+
+        btn_habilitar = QtWidgets.QPushButton("1 - HABILITAR USUÁRIO")
+        btn_habilitar.setFixedSize(720, 52)
+        btn_habilitar.setStyleSheet(btn_style_base.format(cor="#1565C0", cor_press="#0D47A1"))
+        btn_habilitar.clicked.connect(self.abrir_selecao_nivel_habilitar)
+
+        btn_desabilitar = QtWidgets.QPushButton("2 - DESABILITAR USUÁRIO")
+        btn_desabilitar.setFixedSize(720, 52)
+        btn_desabilitar.setStyleSheet(btn_style_base.format(cor="#C62828", cor_press="#8E0000"))
+        btn_desabilitar.clicked.connect(
+            lambda: self.preparar_leitura(
+                "DESABILITAR_USUARIO",
+                "Aproxime o crachá do USUÁRIO/MESTRE para DESABILITAR",
+                origem_voltar="MENU_MESTRE_PRINCIPAL"
+            )
+        )
+
+        btn_git = QtWidgets.QPushButton("3 - SINCRONIZAR CHECKLISTS (GIT)")
+        btn_git.setFixedSize(720, 52)
+        btn_git.setStyleSheet(btn_style_base.format(cor="#E65100", cor_press="#BF360C"))
+        btn_git.clicked.connect(self.ao_clicar_opcao_git)
+
+        btn_config = QtWidgets.QPushButton("4 - CONFIGURAÇÕES")
+        btn_config.setFixedSize(720, 52)
+        btn_config.setStyleSheet(btn_style_base.format(cor="#4A148C", cor_press="#311B92"))
+        btn_config.clicked.connect(self.abrir_tela_configuracoes)
+
+        btn_voltar = QtWidgets.QPushButton("VOLTAR / MENU PRINCIPAL")
+        btn_voltar.setFixedSize(720, 48)
+        btn_voltar.setStyleSheet(btn_style_base.format(cor="#757575", cor_press="#424242"))
+        btn_voltar.clicked.connect(lambda: self.mudar_tela(self.tela_liberar_gt, "TELA_PRINCIPAL"))
+
+        layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
+        layout.addWidget(titulo, alignment=Qt.AlignCenter)
+        layout.addWidget(btn_habilitar, alignment=Qt.AlignCenter)
+        layout.addWidget(btn_desabilitar, alignment=Qt.AlignCenter)
+        layout.addWidget(btn_git, alignment=Qt.AlignCenter)
+        layout.addWidget(btn_config, alignment=Qt.AlignCenter)
+        layout.addWidget(btn_voltar, alignment=Qt.AlignCenter)
+
+        tela.setLayout(layout)
+        return tela
+
+    # ========================================================================
+    # SELEÇÃO DE NÍVEL PARA HABILITAÇÃO (REQUISITO 4)
+    # ========================================================================
+    def criar_tela_selecao_nivel_habilitar(self):
+        tela = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout()
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setContentsMargins(15, 12, 15, 12)
+        layout.setSpacing(12)
+
+        lbl_hdr = self.criar_widget_cabecalho()
+
+        titulo = QtWidgets.QLabel("HABILITAR USUÁRIO - SELEÇÃO DE NÍVEL")
+        titulo.setFont(QFont("Arial", 18, QFont.Bold))
+        titulo.setAlignment(Qt.AlignCenter)
+        titulo.setStyleSheet("color: #1A237E;")
+
+        subtitulo = QtWidgets.QLabel("Selecione o nível de acesso para cadastrar:")
+        subtitulo.setFont(QFont("Arial", 14, QFont.Bold))
+        subtitulo.setAlignment(Qt.AlignCenter)
+
+        btn_style = """
             QPushButton {{
                 background-color: {cor};
                 color: white;
@@ -640,48 +786,117 @@ class SistemaGT(QtWidgets.QMainWindow):
             }}
         """
 
-        btn_liberar = QtWidgets.QPushButton("1 - LIBERAR EQUIPAMENTO")
-        btn_liberar.setFixedSize(720, 54)
-        btn_liberar.setStyleSheet(btn_style_base.format(cor="#2E7D32", cor_press="#1B5E20"))
-        btn_liberar.clicked.connect(
-            lambda: self.preparar_leitura("LIBERAR_EQUIPAMENTO", "Aproxime o crachá para LIBERAR O EQUIPAMENTO"))
+        btn_comum = QtWidgets.QPushButton("1 - USUÁRIO COMUM")
+        btn_comum.setFixedSize(720, 60)
+        btn_comum.setStyleSheet(btn_style.format(cor="#1565C0", cor_press="#0D47A1"))
+        btn_comum.clicked.connect(
+            lambda: self.preparar_leitura(
+                "HABILITAR_USUARIO_COMUM",
+                "Aproxime o crachá do USUÁRIO COMUM para habilitar",
+                origem_voltar="SELECAO_NIVEL"
+            )
+        )
 
-        btn_habilitar = QtWidgets.QPushButton("2 - HABILITAR USUÁRIO")
-        btn_habilitar.setFixedSize(720, 54)
-        btn_habilitar.setStyleSheet(btn_style_base.format(cor="#1565C0", cor_press="#0D47A1"))
-        btn_habilitar.clicked.connect(
-            lambda: self.preparar_leitura("HABILITAR_USUARIO_MESTRE", "Aproxime o CRACHÁ MESTRE para autorizar"))
+        btn_m2 = QtWidgets.QPushButton("2 - MESTRE NÍVEL 2")
+        btn_m2.setFixedSize(720, 60)
+        btn_m2.setStyleSheet(btn_style.format(cor="#2E7D32", cor_press="#1B5E20"))
+        btn_m2.clicked.connect(
+            lambda: self.preparar_leitura(
+                "HABILITAR_MESTRE_N2",
+                "Aproxime o crachá do MESTRE NÍVEL 2 para habilitar",
+                origem_voltar="SELECAO_NIVEL"
+            )
+        )
 
-        btn_desabilitar = QtWidgets.QPushButton("3 - DESABILITAR USUÁRIO")
-        btn_desabilitar.setFixedSize(720, 54)
-        btn_desabilitar.setStyleSheet(btn_style_base.format(cor="#C62828", cor_press="#8E0000"))
-        btn_desabilitar.clicked.connect(
-            lambda: self.preparar_leitura("DESABILITAR_USUARIO_MESTRE", "Aproxime o CRACHÁ MESTRE para autorizar"))
-
-        btn_git = QtWidgets.QPushButton("4 - SINCRONIZAR CHECKLISTS (GIT)")
-        btn_git.setFixedSize(720, 54)
-        btn_git.setStyleSheet(btn_style_base.format(cor="#E65100", cor_press="#BF360C"))
-        btn_git.clicked.connect(self.ao_clicar_opcao_git)
-
-        btn_config = QtWidgets.QPushButton("5 - CONFIGURAÇÕES")
-        btn_config.setFixedSize(720, 54)
-        btn_config.setStyleSheet(btn_style_base.format(cor="#4A148C", cor_press="#311B92"))
-        btn_config.clicked.connect(
-            lambda: self.preparar_leitura("CONFIGURACOES_MESTRE", "Aproxime o CRACHÁ MESTRE para acessar as Configurações"))
+        btn_voltar = QtWidgets.QPushButton("VOLTAR")
+        btn_voltar.setFixedSize(720, 50)
+        btn_voltar.setStyleSheet(btn_style.format(cor="#757575", cor_press="#424242"))
+        btn_voltar.clicked.connect(lambda: self.mudar_tela(self.tela_menu_mestre_principal, "MENU_MESTRE_PRINCIPAL"))
 
         layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
         layout.addWidget(titulo, alignment=Qt.AlignCenter)
-        layout.addWidget(btn_liberar, alignment=Qt.AlignCenter)
-        layout.addWidget(btn_habilitar, alignment=Qt.AlignCenter)
-        layout.addWidget(btn_desabilitar, alignment=Qt.AlignCenter)
-        layout.addWidget(btn_git, alignment=Qt.AlignCenter)
-        layout.addWidget(btn_config, alignment=Qt.AlignCenter)
+        layout.addWidget(subtitulo, alignment=Qt.AlignCenter)
+        layout.addWidget(btn_comum, alignment=Qt.AlignCenter)
+        layout.addWidget(btn_m2, alignment=Qt.AlignCenter)
+        layout.addWidget(btn_voltar, alignment=Qt.AlignCenter)
 
         tela.setLayout(layout)
         return tela
 
+    def abrir_selecao_nivel_habilitar(self):
+        self.mudar_tela(self.tela_selecao_nivel_habilitar, "SELECAO_NIVEL")
+
     # ========================================================================
-    # CONFIGURAÇÕES DO SISTEMA (TELA DE TEMPO DE LIBERAÇÃO)
+    # MENU - MESTRE NÍVEL 2 (REQUISITO 5)
+    # ========================================================================
+    def criar_tela_menu_mestre_nivel2(self):
+        tela = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout()
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setContentsMargins(15, 12, 15, 12)
+        layout.setSpacing(12)
+
+        lbl_hdr = self.criar_widget_cabecalho()
+
+        titulo = QtWidgets.QLabel("MENU - MESTRE NÍVEL 2")
+        titulo.setFont(QFont("Arial", 18, QFont.Bold))
+        titulo.setAlignment(Qt.AlignCenter)
+        titulo.setStyleSheet("color: #1A237E;")
+
+        btn_style = """
+            QPushButton {{
+                background-color: {cor};
+                color: white;
+                border-radius: 10px;
+                font-weight: bold;
+                font-size: 16pt;
+            }}
+            QPushButton:pressed {{
+                background-color: {cor_press};
+            }}
+        """
+
+        btn_hab_comum = QtWidgets.QPushButton("1 - HABILITAR USUÁRIO COMUM")
+        btn_hab_comum.setFixedSize(720, 60)
+        btn_hab_comum.setStyleSheet(btn_style.format(cor="#1565C0", cor_press="#0D47A1"))
+        btn_hab_comum.clicked.connect(
+            lambda: self.preparar_leitura(
+                "HABILITAR_USUARIO_COMUM_N2",
+                "Aproxime o crachá do USUÁRIO COMUM para habilitar",
+                origem_voltar="MENU_MESTRE_NIVEL2"
+            )
+        )
+
+        btn_liberar = QtWidgets.QPushButton("2 - LIBERAR EQUIPAMENTO")
+        btn_liberar.setFixedSize(720, 60)
+        btn_liberar.setStyleSheet(btn_style.format(cor="#2E7D32", cor_press="#1B5E20"))
+        btn_liberar.clicked.connect(self.iniciar_checklist_mestre_n2)
+
+        btn_voltar = QtWidgets.QPushButton("VOLTAR / MENU PRINCIPAL")
+        btn_voltar.setFixedSize(720, 50)
+        btn_voltar.setStyleSheet(btn_style.format(cor="#757575", cor_press="#424242"))
+        btn_voltar.clicked.connect(lambda: self.mudar_tela(self.tela_liberar_gt, "TELA_PRINCIPAL"))
+
+        layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
+        layout.addWidget(titulo, alignment=Qt.AlignCenter)
+        layout.addWidget(btn_hab_comum, alignment=Qt.AlignCenter)
+        layout.addWidget(btn_liberar, alignment=Qt.AlignCenter)
+        layout.addWidget(btn_voltar, alignment=Qt.AlignCenter)
+
+        tela.setLayout(layout)
+        return tela
+
+    def iniciar_checklist_mestre_n2(self):
+        if not self.mestre_n2_atual:
+            self.mestre_n2_atual = {
+                'nome': "Mestre Nível 2",
+                'matricula': "M2_001",
+                'status': "M2"
+            }
+        self.iniciar_checklist_para_usuario(self.mestre_n2_atual)
+
+    # ========================================================================
+    # CONFIGURAÇÕES DO SISTEMA
     # ========================================================================
     def criar_tela_configuracoes(self):
         tela = QtWidgets.QWidget()
@@ -742,7 +957,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         btn_cancelar = QtWidgets.QPushButton("CANCELAR / VOLTAR")
         btn_cancelar.setFixedHeight(44)
         btn_cancelar.setStyleSheet(btn_style_nav.format(cor="#757575", cor_press="#424242"))
-        btn_cancelar.clicked.connect(lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
+        btn_cancelar.clicked.connect(lambda: self.mudar_tela(self.tela_menu_mestre_principal, "MENU_MESTRE_PRINCIPAL"))
 
         btn_layout.addWidget(btn_cancelar)
         btn_layout.addWidget(btn_salvar)
@@ -834,7 +1049,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.btn_voltar_rede = QtWidgets.QPushButton("VOLTAR AO MENU")
         self.btn_voltar_rede.setFixedHeight(48)
         self.btn_voltar_rede.setStyleSheet(style_btn.format(cor="#757575", cor_press="#424242"))
-        self.btn_voltar_rede.clicked.connect(lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
+        self.btn_voltar_rede.clicked.connect(lambda: self.mudar_tela(self.tela_menu_mestre_principal, "MENU_MESTRE_PRINCIPAL"))
 
         self.btn_ir_wifi = QtWidgets.QPushButton("CONFIGURAR WI-FI")
         self.btn_ir_wifi.setFixedHeight(48)
@@ -885,10 +1100,7 @@ class SistemaGT(QtWidgets.QMainWindow):
             return
 
         if tem_wifi and tem_internet:
-            self.preparar_leitura(
-                "SINCRONIZAR_GIT_MESTRE",
-                f"Conectado à rede: {ssid}\n\nAproxime o CRACHÁ MESTRE para autorizar a Sincronização"
-            )
+            self.iniciar_sincronizacao_git()
         else:
             msg_detalhe = (
                 f"REDE WI-FI: {ssid}\n"
@@ -971,7 +1183,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         btn_cancelar_wifi = QtWidgets.QPushButton("CANCELAR / VOLTAR")
         btn_cancelar_wifi.setFixedHeight(44)
         btn_cancelar_wifi.setStyleSheet(btn_style_nav.format(cor="#757575", cor_press="#424242"))
-        btn_cancelar_wifi.clicked.connect(lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
+        btn_cancelar_wifi.clicked.connect(lambda: self.mudar_tela(self.tela_menu_mestre_principal, "MENU_MESTRE_PRINCIPAL"))
 
         btn_layout.addWidget(btn_cancelar_wifi)
         btn_layout.addWidget(self.btn_conectar_wifi)
@@ -1036,11 +1248,7 @@ class SistemaGT(QtWidgets.QMainWindow):
     def ao_concluir_conexao_wifi(self, sucesso, mensagem):
         self.btn_conectar_wifi.setEnabled(True)
         if sucesso:
-            ssid_atual = self.input_ssid.text().strip()
-            self.preparar_leitura(
-                "SINCRONIZAR_GIT_MESTRE",
-                f"Conectado à rede: {ssid_atual}\n\nAproxime o CRACHÁ MESTRE para autorizar a Sincronização"
-            )
+            self.iniciar_sincronizacao_git()
         else:
             self.lbl_wifi_status.setText(f"Falha: {mensagem}\nTente novamente ou volte ao menu.")
             self.lbl_wifi_status.setStyleSheet("color: #C62828; font-weight: bold;")
@@ -1090,7 +1298,7 @@ class SistemaGT(QtWidgets.QMainWindow):
             self.lbl_status_rede_detalhe.setStyleSheet(
                 "color: #1B5E20; padding: 15px; border: 2px solid #2E7D32; border-radius: 10px; background-color: #E8F5E9;"
             )
-            QTimer.singleShot(4000, lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
+            QTimer.singleShot(4000, lambda: self.mudar_tela(self.tela_menu_mestre_principal, "MENU_MESTRE_PRINCIPAL"))
         else:
             self.lbl_status_rede_detalhe.setText(f"FALHA NA SINCRONIZAÇÃO GIT\n\n{mensagem}")
             self.lbl_status_rede_detalhe.setStyleSheet(
@@ -1137,7 +1345,7 @@ class SistemaGT(QtWidgets.QMainWindow):
                 background-color: #424242;
             }
         """)
-        btn_cancelar.clicked.connect(lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
+        btn_cancelar.clicked.connect(self.cancelar_leitura_rfid)
 
         layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
         layout.addWidget(self.lbl_instrucao)
@@ -1147,7 +1355,8 @@ class SistemaGT(QtWidgets.QMainWindow):
         tela.setLayout(layout)
         return tela
 
-    def preparar_leitura(self, estado, instrucao):
+    def preparar_leitura(self, estado, instrucao, origem_voltar="TELA_PRINCIPAL"):
+        self.origem_voltar_leitura = origem_voltar
         self.lbl_instrucao.setText(instrucao)
         self.lbl_status.setText("Aguardando leitura do leitor RFID...")
         self.lbl_status.setStyleSheet(
@@ -1155,12 +1364,22 @@ class SistemaGT(QtWidgets.QMainWindow):
         )
         self.mudar_tela(self.tela_leitura, estado)
 
+    def cancelar_leitura_rfid(self):
+        if self.origem_voltar_leitura == "SELECAO_NIVEL":
+            self.mudar_tela(self.tela_selecao_nivel_habilitar, "SELECAO_NIVEL")
+        elif self.origem_voltar_leitura == "MENU_MESTRE_NIVEL2":
+            self.mudar_tela(self.tela_menu_mestre_nivel2, "MENU_MESTRE_NIVEL2")
+        elif self.origem_voltar_leitura == "MENU_MESTRE_PRINCIPAL":
+            self.mudar_tela(self.tela_menu_mestre_principal, "MENU_MESTRE_PRINCIPAL")
+        else:
+            self.mudar_tela(self.tela_liberar_gt, "TELA_PRINCIPAL")
+
     def mostrar_mensagem(self, texto, cor_fundo, cor_texto):
         self.lbl_status.setText(texto)
         self.lbl_status.setStyleSheet(
             f"color: {cor_texto}; padding: 15px; border: 2px solid {cor_fundo}; border-radius: 12px; background-color: {cor_fundo}; font-weight: bold;"
         )
-        QTimer.singleShot(3000, lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
+        QTimer.singleShot(3000, self.cancelar_leitura_rfid)
 
     # ========================================================================
     # CHECKLIST (AMPLIADO E OTIMIZADO PARA TOUCHSCREEN 800x480)
@@ -1180,7 +1399,6 @@ class SistemaGT(QtWidgets.QMainWindow):
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(6)
 
-        # Pergunta com fonte ampliada para 17pt Bold, alinhamento à esquerda e quebra de linha automática
         lbl_p = QtWidgets.QLabel(f"{idx_pergunta + 1}. {self.perguntas[idx_pergunta]}")
         lbl_p.setFont(QFont("Arial", 17, QFont.Bold))
         lbl_p.setWordWrap(True)
@@ -1270,7 +1488,7 @@ class SistemaGT(QtWidgets.QMainWindow):
 
         idx_tela_atual = idx1 // 2
         if idx_tela_atual == 0:
-            btn_voltar.clicked.connect(lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
+            btn_voltar.clicked.connect(lambda: self.mudar_tela(self.tela_liberar_gt, "TELA_PRINCIPAL"))
         else:
             btn_voltar.clicked.connect(lambda: self.mudar_tela(self.telas_checklist_perguntas[idx_tela_atual - 1],
                                                                f"CHK_PAG_{idx_tela_atual - 1}"))
@@ -1378,6 +1596,7 @@ class SistemaGT(QtWidgets.QMainWindow):
             "color: #1B5E20; background-color: #E8F5E9; border: 2px solid #2E7D32; border-radius: 12px; padding: 12px 24px;"
         )
 
+        # REQUISITO 6: Botão Voltar ao Menu Principal mantém GPIOs e Cronômetro rodando
         btn_voltar_menu = QtWidgets.QPushButton("Voltar ao Menu Principal")
         btn_voltar_menu.setFont(QFont("Arial", 13, QFont.Bold))
         btn_voltar_menu.setFixedHeight(48)
@@ -1392,7 +1611,7 @@ class SistemaGT(QtWidgets.QMainWindow):
                 background-color: #01579B;
             }
         """)
-        btn_voltar_menu.clicked.connect(self.finalizar_tempo_liberacao)
+        btn_voltar_menu.clicked.connect(self.voltar_ao_menu_principal_sem_desligar)
 
         layout.addWidget(lbl_titulo, alignment=Qt.AlignCenter)
         layout.addWidget(self.lbl_msg_aprovado, alignment=Qt.AlignCenter)
@@ -1400,6 +1619,10 @@ class SistemaGT(QtWidgets.QMainWindow):
         layout.addWidget(btn_voltar_menu, alignment=Qt.AlignCenter)
 
         return widget
+
+    def voltar_ao_menu_principal_sem_desligar(self):
+        """Retorna à tela principal mantendo o cronômetro e os GPIOs acionados (Requisito 6)."""
+        self.mudar_tela(self.tela_liberar_gt, "TELA_PRINCIPAL")
 
     def criar_tela_reprovado_bloqueado(self):
         tela = QtWidgets.QWidget()
@@ -1458,7 +1681,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.tela_confirmacao_operacao.setStyleSheet(f"background-color: {cor_fundo};")
         self.lbl_confirmacao_operacao.setText(texto)
         self.mudar_tela(self.tela_confirmacao_operacao, "CONFIRMACAO_OPERACAO")
-        QTimer.singleShot(3000, lambda: self.mudar_tela(self.tela_liberar_gt, "MENU_GT"))
+        QTimer.singleShot(3000, self.cancelar_leitura_rfid)
 
     # ========================================================================
     # PROCESSAMENTO DE CHECKLIST E LIBERAÇÃO
@@ -1502,7 +1725,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         if self.operador_atual is None:
             QtWidgets.QMessageBox.warning(self, "Atenção", "Nenhum operador identificado.")
             self.finalizacao_em_andamento = False
-            self.mudar_tela(self.tela_liberar_gt, "MENU_GT")
+            self.mudar_tela(self.tela_liberar_gt, "TELA_PRINCIPAL")
             return
 
         respostas_lista = [self.respostas_checklist[i] for i in range(total_perguntas)]
@@ -1575,11 +1798,18 @@ class SistemaGT(QtWidgets.QMainWindow):
         if hasattr(self, 'lbl_tempo_restante'):
             self.lbl_tempo_restante.setText("00:00:00")
 
+        if hasattr(self, 'lbl_status_main'):
+            self.lbl_status_main.setText("Aguardando leitura do crachá...")
+            self.lbl_status_main.setStyleSheet(
+                "color: #424242; padding: 20px; border: 2px dashed #BDBDBD; border-radius: 12px; background-color: #FFFFFF;"
+            )
+
         set_gpios(0)
-        self.mudar_tela(self.tela_liberar_gt, "MENU_GT")
+        if self.central_widget.currentWidget() in [self.tela_aprovado]:
+            self.mudar_tela(self.tela_liberar_gt, "TELA_PRINCIPAL")
 
     # ========================================================================
-    # PROCESSAMENTO DE LEITURA RFID
+    # PROCESSAMENTO DE LEITURA RFID E NÍVEIS DE USUÁRIO (REQUISITOS 1 A 6)
     # ========================================================================
     @pyqtSlot(str)
     def processar_rfid(self, uid):
@@ -1601,36 +1831,52 @@ class SistemaGT(QtWidgets.QMainWindow):
         print(f"[PROCESSAR RFID] UID Lido: {uid_clean} | Estado: {self.estado_atual}")
 
         if self.estado_atual == "SISTEMA_BLOQUEADO":
-            if uid_clean == UID_MESTRE:
+            func = self.dados.buscar_por_cracha(uid_clean) if uid_clean != UID_MESTRE else None
+            is_mestre = (uid_clean == UID_MESTRE) or (func and func.get('status') in ['M2', 'MESTRE'])
+            if is_mestre:
                 print("✓ Sistema desbloqueado com Crachá Mestre!")
-                self.mudar_tela(self.tela_liberar_gt, "MENU_GT")
+                self.mudar_tela(self.tela_liberar_gt, "TELA_PRINCIPAL")
             return
 
-        if self.central_widget.currentWidget() != self.tela_leitura:
-            return
-
-        if self.estado_atual == "SINCRONIZAR_GIT_MESTRE":
+        # ====================================================================
+        # PROCESSAMENTO NA TELA PRINCIPAL
+        # ====================================================================
+        if self.estado_atual == "TELA_PRINCIPAL":
+            # REQUISITO 3: MESTRE PRINCIPAL
             if uid_clean == UID_MESTRE:
-                self.iniciar_sincronizacao_git()
-            else:
-                self.mostrar_mensagem("ERRO\n\nCrachá não é Mestre!", "#C62828", "white")
+                print("✓ Mestre Principal autenticado. Abrindo Menu Administrativo...")
+                self.mudar_tela(self.tela_menu_mestre_principal, "MENU_MESTRE_PRINCIPAL")
+                return
 
-        elif self.estado_atual == "CONFIGURACOES_MESTRE":
-            if uid_clean == UID_MESTRE:
-                self.abrir_tela_configuracoes()
-            else:
-                self.mostrar_mensagem("ERRO\n\nCrachá não é Mestre!", "#C62828", "white")
-
-        elif self.estado_atual == "LIBERAR_EQUIPAMENTO":
             func = self.dados.buscar_por_cracha(uid_clean)
             if not func:
-                self.mostrar_mensagem("ACESSO NEGADO\n\nCrachá não cadastrado!", "#C62828", "white")
+                self.mostrar_mensagem_main("ACESSO NEGADO\n\nCrachá não cadastrado!", "#C62828", "white", 3)
                 return
 
-            if func['status'] != 'H':
-                self.mostrar_mensagem(f"ACESSO NEGADO\n\nUsuário Desabilitado!\n{func['nome']}", "#C62828", "white")
+            status = func.get('status', 'D')
+            if status == 'D':
+                self.mostrar_mensagem_main(f"ACESSO NEGADO\n\nUsuário Desabilitado!\n{func['nome']}", "#C62828", "white", 3)
                 return
 
+            # REQUISITO 5: MESTRE NÍVEL 2
+            if status == 'M2':
+                print(f"✓ Mestre Nível 2 autenticado: {func['nome']}. Abrindo Menu Mestre Nível 2...")
+                self.mestre_n2_atual = func
+                self.mudar_tela(self.tela_menu_mestre_nivel2, "MENU_MESTRE_NIVEL2")
+                return
+
+            # REQUISITO 2: USUÁRIO COMUM
+            # REQUISITO 6: Se o equipamento já está liberado
+            if self.fim_liberacao is not None:
+                self.mostrar_mensagem_main(
+                    "Equipamento já está acionado.\nAguarde o cronômetro acabar.",
+                    "#E65100",
+                    "white",
+                    3
+                )
+                return
+
+            # Usuário Comum com equipamento desligado
             turno_atual = self.obter_turno_atual()
             aprovados_no_turno = self.checklists_aprovados_turno.get(turno_atual, set())
 
@@ -1638,54 +1884,49 @@ class SistemaGT(QtWidgets.QMainWindow):
                 self.liberar_equipamento_por_3min(func['matricula'], func['nome'])
             else:
                 self.iniciar_checklist_para_usuario(func)
+            return
 
-        elif self.estado_atual == "HABILITAR_USUARIO_MESTRE":
-            if uid_clean == UID_MESTRE:
-                self.estado_atual = "HABILITAR_USUARIO_FINAL"
-                self.uid_bloqueado_ate_novo_cracha = UID_MESTRE
-                self.lbl_instrucao.setText("Aproxime o crachá do USUÁRIO")
-                self.lbl_status.setText("✓ Mestre Autorizado!\n\nRetire o crachá mestre e aproxime o do Usuário...")
-                self.lbl_status.setStyleSheet(
-                    "color: #1B5E20; padding: 15px; border: 2px solid #2E7D32; border-radius: 12px; font-weight: bold; background-color: #E8F5E9;"
-                )
-            else:
-                self.mostrar_mensagem("ERRO\n\nCrachá não é Mestre!", "#C62828", "white")
+        # ====================================================================
+        # PROCESSAMENTO DE CADASTRO / HABILITAÇÃO NA TELA DE LEITURA
+        # ====================================================================
+        if self.central_widget.currentWidget() != self.tela_leitura:
+            return
 
-        elif self.estado_atual == "HABILITAR_USUARIO_FINAL":
-            if uid_clean == UID_MESTRE:
-                print("[RFID] Crachá Mestre detectado novamente. Aguardando crachá do Usuário...")
-                return
-
+        if self.estado_atual == "HABILITAR_USUARIO_COMUM":
             func = self.dados.buscar_por_cracha(uid_clean)
             if func:
                 if self.dados.alterar_status(uid_clean, 'H'):
-                    self.mostrar_confirmacao_operacao("Usuário habilitado", "#2E7D32")
+                    self.mostrar_confirmacao_operacao("USUÁRIO COMUM HABILITADO", "#2E7D32")
                 else:
                     self.mostrar_mensagem("ERRO\n\nFalha ao atualizar planilha!", "#C62828", "white")
             else:
-                self.mostrar_mensagem("ERRO\n\nCrachá não encontrado!", "#C62828", "white")
+                self.mostrar_mensagem("ERRO\n\nCrachá não encontrado na planilha!", "#C62828", "white")
 
-        elif self.estado_atual == "DESABILITAR_USUARIO_MESTRE":
-            if uid_clean == UID_MESTRE:
-                self.estado_atual = "DESABILITAR_USUARIO_FINAL"
-                self.uid_bloqueado_ate_novo_cracha = UID_MESTRE
-                self.lbl_instrucao.setText("Aproxime o crachá do USUÁRIO")
-                self.lbl_status.setText("✓ Mestre Autorizado!\n\nRetire o crachá mestre e aproxime o do Usuário...")
-                self.lbl_status.setStyleSheet(
-                    "color: #1B5E20; padding: 15px; border: 2px solid #2E7D32; border-radius: 12px; font-weight: bold; background-color: #E8F5E9;"
-                )
+        elif self.estado_atual == "HABILITAR_USUARIO_COMUM_N2":
+            func = self.dados.buscar_por_cracha(uid_clean)
+            if func:
+                if self.dados.alterar_status(uid_clean, 'H'):
+                    self.mostrar_confirmacao_operacao("USUÁRIO COMUM HABILITADO", "#2E7D32")
+                else:
+                    self.mostrar_mensagem("ERRO\n\nFalha ao atualizar planilha!", "#C62828", "white")
             else:
-                self.mostrar_mensagem("ERRO\n\nCrachá não é Mestre!", "#C62828", "white")
+                self.mostrar_mensagem("ERRO\n\nCrachá não encontrado na planilha!", "#C62828", "white")
 
-        elif self.estado_atual == "DESABILITAR_USUARIO_FINAL":
-            if uid_clean == UID_MESTRE:
-                print("[RFID] Crachá Mestre detectado novamente. Aguardando crachá do Usuário...")
-                return
+        elif self.estado_atual == "HABILITAR_MESTRE_N2":
+            func = self.dados.buscar_por_cracha(uid_clean)
+            if func:
+                if self.dados.alterar_status(uid_clean, 'M2'):
+                    self.mostrar_confirmacao_operacao("MESTRE NÍVEL 2 HABILITADO", "#2E7D32")
+                else:
+                    self.mostrar_mensagem("ERRO\n\nFalha ao atualizar planilha!", "#C62828", "white")
+            else:
+                self.mostrar_mensagem("ERRO\n\nCrachá não encontrado na planilha!", "#C62828", "white")
 
+        elif self.estado_atual == "DESABILITAR_USUARIO":
             func = self.dados.buscar_por_cracha(uid_clean)
             if func:
                 if self.dados.alterar_status(uid_clean, 'D'):
-                    self.mostrar_confirmacao_operacao("Usuário desabilitado", "#C62828")
+                    self.mostrar_confirmacao_operacao("USUÁRIO DESABILITADO", "#C62828")
                 else:
                     self.mostrar_mensagem("ERRO\n\nFalha ao atualizar planilha!", "#C62828", "white")
             else:
