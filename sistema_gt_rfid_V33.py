@@ -1333,7 +1333,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         return os.path.realpath(raiz) if raiz else None
 
     def publicar_pdf_no_github(self, pdf_path):
-        """Publica apenas este PDF no branch GitHub já configurado; nunca cria/clona repositório."""
+        """Publica apenas este PDF no repositório GitHub já configurado."""
         pdf_path = os.path.realpath(os.path.abspath(pdf_path))
         if not pdf_path.lower().endswith(".pdf") or not os.path.isfile(pdf_path):
             return False, "PDF não encontrado ou extensão inválida. O arquivo local foi preservado."
@@ -1417,9 +1417,10 @@ class SistemaGT(QtWidgets.QMainWindow):
                 repositorio, ["diff", "--cached", "--quiet", "--", caminho_relativo], timeout=5
             )
             if diferenca.returncode == 1:
+                nome_pdf = os.path.basename(pdf_path)
                 commit = self._executar_git(
                     repositorio,
-                    ["commit", "-m", f"Adicionar checklist PDF: {os.path.basename(pdf_path)}", "--", caminho_relativo],
+                    ["commit", "-m", f"Novo checklist - {nome_pdf}", "--", caminho_relativo],
                     timeout=15
                 )
                 if commit.returncode != 0:
