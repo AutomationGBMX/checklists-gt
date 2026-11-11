@@ -8,6 +8,7 @@ Versão 36 - Níveis de Acesso (Mestre Principal, Mestre Nível 2 e Usuário Com
 
 import sys
 import os
+import re
 import json
 import socket
 import threading
@@ -30,8 +31,10 @@ from PyQt5.QtCore import pyqtSignal, pyqtSlot, QObject, Qt, QTimer
 # ============================================================================
 UID_MESTRE = "786538887"
 
-PASTA_CHECKLISTS = os.path.abspath("./checklists")
-ARQUIVO_CONFIG = os.path.abspath("./configuracoes.json")
+PASTA_APLICACAO = os.path.dirname(os.path.realpath(__file__))
+PASTA_CHECKLISTS = os.path.join(PASTA_APLICACAO, "checklists")
+ARQUIVO_CONFIG = os.path.join(PASTA_APLICACAO, "configuracoes.json")
+ARQUIVO_PLANILHA = os.path.join(PASTA_APLICACAO, "Lista_Basedecrachás.xlsx")
 TEMPO_LIBERACAO_SEGUNDOS_PADRAO = 180
 
 # Inicialização de Hardware GPIO
@@ -307,7 +310,7 @@ class LeituraRC522(threading.Thread):
 # GERENCIAMENTO DE DADOS (EXCEL ROBUSTO COM LEITURA STRING)
 # ============================================================================
 class GerenciadorDados:
-    def __init__(self, arquivo_excel='Lista_Basedecrachás.xlsx'):
+    def __init__(self, arquivo_excel=ARQUIVO_PLANILHA):
         self.arquivo = arquivo_excel
         self.df = None
         self.carregar_planilha()
@@ -412,6 +415,7 @@ class GerenciadorDados:
 # ============================================================================
 class SistemaGT(QtWidgets.QMainWindow):
     sinal_git_finalizado = pyqtSignal(bool, str)
+    sinal_pdf_publicado = pyqtSignal(bool, str)
     sinal_wifi_finalizado = pyqtSignal(bool, str)
     sinal_diagnostico_rede = pyqtSignal(bool, bool, str)
 
@@ -432,6 +436,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         self.respostas_checklist = {}
         self.finalizacao_em_andamento = False
         self.thread_finalizacao = None
+        self.git_lock = threading.Lock()
 
         self.ultimo_uid_lido = None
         self.tempo_ultimo_lido = 0
@@ -439,6 +444,7 @@ class SistemaGT(QtWidgets.QMainWindow):
 
         # Conectar sinais
         self.sinal_git_finalizado.connect(self.ao_concluir_sincronizacao_git)
+        self.sinal_pdf_publicado.connect(self.ao_concluir_publicacao_pdf)
         self.sinal_wifi_finalizado.connect(self.ao_concluir_conexao_wifi)
         self.sinal_diagnostico_rede.connect(self.ao_concluir_diagnostico_rede)
 
@@ -1263,15 +1269,37 @@ class SistemaGT(QtWidgets.QMainWindow):
         threading.Thread(target=self._worker_sincronizar_git, daemon=True).start()
 
     def _worker_sincronizar_git(self):
-        try:
-            os.makedirs(PASTA_CHECKLISTS, exist_ok=True)
+        with self.git_lock:
+            self._worker_sincronizar_git_com_lock()
 
-            subprocess.run(["git", "add", "checklists/.", "Lista_Basedecrachás.xlsx"], check=True, capture_output=True, text=True, timeout=10)
+    def _worker_sincronizar_git_com_lock(self):
+        try:
+            repositorio = self._obter_raiz_repositorio_git()
+            if not repositorio:
+                self.sinal_git_finalizado.emit(
+                    False, "A pasta do aplicativo não pertence a um repositório Git existente."
+                )
+                return
+
+            os.makedirs(PASTA_CHECKLISTS, exist_ok=True)
+            pasta_relativa = os.path.relpath(PASTA_CHECKLISTS, repositorio)
+            planilha_relativa = os.path.relpath(self.dados.arquivo, repositorio)
+
+            subprocess.run(
+                ["git", "-C", repositorio, "add", "--", f"{pasta_relativa}/.", planilha_relativa],
+                check=True, capture_output=True, text=True, timeout=15
+            )
 
             msg_commit = f"Sincronização manual - {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
-            res_commit = subprocess.run(["git", "commit", "-m", msg_commit], capture_output=True, text=True, timeout=10)
+            res_commit = subprocess.run(
+                ["git", "-C", repositorio, "commit", "-m", msg_commit, "--", f"{pasta_relativa}/.", planilha_relativa],
+                capture_output=True, text=True, timeout=15
+            )
 
-            res_push = subprocess.run(["git", "push"], capture_output=True, text=True, timeout=20)
+            res_push = subprocess.run(
+                ["git", "-C", repositorio, "push"],
+                capture_output=True, text=True, timeout=30
+            )
 
             if res_push.returncode == 0:
                 if "nothing to commit" in res_commit.stdout or "nothing to commit" in res_commit.stderr:
@@ -1288,6 +1316,134 @@ class SistemaGT(QtWidgets.QMainWindow):
             self.sinal_git_finalizado.emit(False, f"Falha no Git:\n{err_msg[:120]}")
         except Exception as e:
             self.sinal_git_finalizado.emit(False, f"Erro inesperado:\n{str(e)[:120]}")
+
+    def _executar_git(self, diretorio, argumentos, timeout=10):
+        return subprocess.run(
+            ["git", "-C", diretorio] + list(argumentos),
+            capture_output=True, text=True, timeout=timeout
+        )
+
+    def _obter_raiz_repositorio_git(self):
+        resultado = self._executar_git(
+            PASTA_APLICACAO, ["rev-parse", "--show-toplevel"], timeout=5
+        )
+        if resultado.returncode != 0:
+            return None
+        raiz = resultado.stdout.strip()
+        return os.path.realpath(raiz) if raiz else None
+
+    def publicar_pdf_no_github(self, pdf_path):
+        """Publica apenas este PDF no branch GitHub já configurado; nunca cria/clona repositório."""
+        pdf_path = os.path.realpath(os.path.abspath(pdf_path))
+        if not pdf_path.lower().endswith(".pdf") or not os.path.isfile(pdf_path):
+            return False, "PDF não encontrado ou extensão inválida. O arquivo local foi preservado."
+
+        with self.git_lock:
+            repositorio = self._obter_raiz_repositorio_git()
+            if not repositorio:
+                return False, "Repositório Git existente não encontrado; o PDF ficou salvo localmente."
+
+            try:
+                if os.path.commonpath([repositorio, pdf_path]) != repositorio:
+                    return False, "PDF está fora do repositório existente; nada foi enviado."
+            except ValueError:
+                return False, "Caminho do PDF inválido; nada foi enviado."
+
+            caminho_relativo = os.path.relpath(pdf_path, repositorio)
+
+            ignorado = self._executar_git(
+                repositorio, ["check-ignore", "-q", "--", caminho_relativo], timeout=5
+            )
+            if ignorado.returncode == 0:
+                return False, "A pasta/arquivo está no .gitignore; PDF preservado localmente."
+            if ignorado.returncode not in (1,):
+                return False, "Não foi possível verificar as regras .gitignore; nada foi enviado."
+
+            branch_result = self._executar_git(
+                repositorio, ["symbolic-ref", "--quiet", "--short", "HEAD"], timeout=5
+            )
+            if branch_result.returncode != 0:
+                return False, "HEAD está destacado; configure uma branch local antes do envio."
+            branch = branch_result.stdout.strip()
+
+            remote_result = self._executar_git(
+                repositorio, ["config", "--get", f"branch.{branch}.remote"], timeout=5
+            )
+            merge_result = self._executar_git(
+                repositorio, ["config", "--get", f"branch.{branch}.merge"], timeout=5
+            )
+            if remote_result.returncode != 0 or merge_result.returncode != 0:
+                return False, "A branch não tem remoto de publicação configurado; PDF ficou local."
+
+            remoto = remote_result.stdout.strip()
+            ref_remota = merge_result.stdout.strip()
+            if remoto == "." or not ref_remota.startswith("refs/heads/"):
+                return False, "A branch não aponta para uma branch remota publicável."
+
+            url_result = self._executar_git(
+                repositorio, ["remote", "get-url", remoto], timeout=5
+            )
+            if url_result.returncode != 0 or "github.com" not in url_result.stdout.lower():
+                return False, "Não encontrei um remoto GitHub configurado para esta branch."
+
+            branch_remota = ref_remota[len("refs/heads/"):]
+            ref_tracking = f"refs/remotes/{remoto}/{branch_remota}"
+            fetch = self._executar_git(
+                repositorio,
+                ["fetch", "--quiet", remoto, f"{ref_remota}:{ref_tracking}"],
+                timeout=25
+            )
+            if fetch.returncode != 0:
+                return False, "Falha ao consultar o GitHub. Verifique rede/permissões; PDF ficou local."
+
+            divergencia = self._executar_git(
+                repositorio,
+                ["rev-list", "--left-right", "--count", f"HEAD...{ref_tracking}"],
+                timeout=5
+            )
+            if divergencia.returncode != 0:
+                return False, "Não foi possível comparar a branch local com o GitHub; nada foi enviado."
+            contagens = divergencia.stdout.strip().split()
+            if len(contagens) != 2 or contagens != ["0", "0"]:
+                return False, "Branch local/remota divergente ou com commits pendentes; sincronize manualmente. PDF ficou local."
+
+            adicionar = self._executar_git(
+                repositorio, ["add", "--", caminho_relativo], timeout=10
+            )
+            if adicionar.returncode != 0:
+                return False, "Git não conseguiu adicionar o PDF; arquivo preservado localmente."
+
+            diferenca = self._executar_git(
+                repositorio, ["diff", "--cached", "--quiet", "--", caminho_relativo], timeout=5
+            )
+            if diferenca.returncode == 1:
+                commit = self._executar_git(
+                    repositorio,
+                    ["commit", "-m", f"Adicionar checklist PDF: {os.path.basename(pdf_path)}", "--", caminho_relativo],
+                    timeout=15
+                )
+                if commit.returncode != 0:
+                    return False, "Falha ao criar commit. Configure user.name/user.email; PDF ficou local."
+            elif diferenca.returncode != 0:
+                return False, "Falha ao verificar o PDF preparado para commit; nada foi enviado."
+
+            push = self._executar_git(
+                repositorio, ["push", remoto, f"HEAD:{ref_remota}"], timeout=35
+            )
+            if push.returncode != 0:
+                return False, "GitHub recusou/não concluiu o envio. Confira rede e credenciais; PDF ficou local."
+
+            return True, f"PDF enviado ao GitHub: {os.path.basename(pdf_path)}"
+
+    @pyqtSlot(bool, str)
+    def ao_concluir_publicacao_pdf(self, sucesso, mensagem):
+        cor = "#1B5E20" if sucesso else "#B71C1C"
+        for nome_label in ("lbl_status_pdf_aprovado", "lbl_status_pdf_reprovado"):
+            label = getattr(self, nome_label, None)
+            if label is not None:
+                label.setText(mensagem)
+                label.setStyleSheet(f"color: {cor}; font-size: 9pt; font-weight: bold;")
+        print(f"[GITHUB PDF] {'OK' if sucesso else 'FALHA'}: {mensagem}")
 
     @pyqtSlot(bool, str)
     def ao_concluir_sincronizacao_git(self, sucesso, mensagem):
@@ -1596,6 +1752,11 @@ class SistemaGT(QtWidgets.QMainWindow):
             "color: #1B5E20; background-color: #E8F5E9; border: 2px solid #2E7D32; border-radius: 12px; padding: 12px 24px;"
         )
 
+        self.lbl_status_pdf_aprovado = QtWidgets.QLabel("Gerando PDF e enviando ao GitHub...")
+        self.lbl_status_pdf_aprovado.setAlignment(Qt.AlignCenter)
+        self.lbl_status_pdf_aprovado.setWordWrap(True)
+        self.lbl_status_pdf_aprovado.setStyleSheet("color: #616161; font-size: 9pt;")
+
         # REQUISITO 6: Botão Voltar ao Menu Principal mantém GPIOs e Cronômetro rodando
         btn_voltar_menu = QtWidgets.QPushButton("Voltar ao Menu Principal")
         btn_voltar_menu.setFont(QFont("Arial", 13, QFont.Bold))
@@ -1616,6 +1777,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         layout.addWidget(lbl_titulo, alignment=Qt.AlignCenter)
         layout.addWidget(self.lbl_msg_aprovado, alignment=Qt.AlignCenter)
         layout.addWidget(self.lbl_tempo_restante, alignment=Qt.AlignCenter)
+        layout.addWidget(self.lbl_status_pdf_aprovado, alignment=Qt.AlignCenter)
         layout.addWidget(btn_voltar_menu, alignment=Qt.AlignCenter)
 
         return widget
@@ -1644,9 +1806,15 @@ class SistemaGT(QtWidgets.QMainWindow):
         lbl_trava.setStyleSheet("color: #FFEBEE;")
         lbl_trava.setAlignment(Qt.AlignCenter)
 
+        self.lbl_status_pdf_reprovado = QtWidgets.QLabel("Gerando PDF e enviando ao GitHub...")
+        self.lbl_status_pdf_reprovado.setAlignment(Qt.AlignCenter)
+        self.lbl_status_pdf_reprovado.setWordWrap(True)
+        self.lbl_status_pdf_reprovado.setStyleSheet("color: #FFFFFF; font-size: 9pt; font-weight: bold;")
+
         layout.addWidget(lbl_hdr, alignment=Qt.AlignCenter)
         layout.addWidget(lbl_msg)
         layout.addWidget(lbl_trava)
+        layout.addWidget(self.lbl_status_pdf_reprovado)
         tela.setLayout(layout)
         return tela
 
@@ -1745,6 +1913,11 @@ class SistemaGT(QtWidgets.QMainWindow):
             self.btn_concluir_checklist.setEnabled(False)
 
         self._aplicar_resultado_checklist(dados_checklist)
+        for nome_label in ("lbl_status_pdf_aprovado", "lbl_status_pdf_reprovado"):
+            label = getattr(self, nome_label, None)
+            if label is not None:
+                label.setText("Gerando PDF e enviando ao GitHub...")
+                label.setStyleSheet("color: #616161; font-size: 9pt; font-weight: bold;")
 
         self.thread_finalizacao = threading.Thread(
             target=self._gerar_pdf_em_background,
@@ -1772,8 +1945,17 @@ class SistemaGT(QtWidgets.QMainWindow):
             pdf_path = self.gerar_pdf_checklist(dados_checklist)
             if pdf_path:
                 print(f"[CHECKLIST] PDF gerado com sucesso: {pdf_path}")
+                sucesso, mensagem = self.publicar_pdf_no_github(pdf_path)
+                self.sinal_pdf_publicado.emit(sucesso, mensagem)
+            else:
+                self.sinal_pdf_publicado.emit(
+                    False, "Falha ao gerar o PDF; confira o log. O checklist não foi enviado."
+                )
         except Exception as erro:
             print(f"[CHECKLIST] Erro ao gerar registro PDF: {erro}")
+            self.sinal_pdf_publicado.emit(
+                False, "Erro ao gerar/publicar o PDF; confira o log."
+            )
 
     def liberar_equipamento_por_3min(self, matricula, nome):
         self.timer_liberacao.stop()
@@ -1938,7 +2120,8 @@ class SistemaGT(QtWidgets.QMainWindow):
     def gerar_pdf_checklist(self, dados):
         try:
             os.makedirs(PASTA_CHECKLISTS, exist_ok=True)
-            nome_arq = f"checklist_{dados['operador'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            operador_seguro = re.sub(r"[^A-Za-z0-9_-]+", "_", str(dados.get("operador", "operador"))).strip("_") or "operador"
+            nome_arq = f"checklist_{operador_seguro}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.pdf"
             arquivo_pdf = os.path.join(PASTA_CHECKLISTS, nome_arq)
 
             doc = SimpleDocTemplate(arquivo_pdf, pagesize=letter, topMargin=0.4 * inch, bottomMargin=0.4 * inch,
