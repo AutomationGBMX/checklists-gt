@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<title>Painel de Checklists GBMX</title>
+<style>
+  :root {
+    --verde-escuro: #007330; --verde: #008B39; --limao: #9FC63B; --reprovado: #D03B3B;
+    --texto: #1F2A24; --fundo: #F4F5F3; --borda: #DDE3DD; --suave: #6B7A70;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fundo); color: var(--texto); font: 14px "Segoe UI", sans-serif; }
+  .conteudo { max-width: 1400px; margin: 0 auto; padding: 18px 22px 12px; }
+
+  .cabecalho { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    background: linear-gradient(100deg, var(--verde-escuro) 0%, var(--verde-escuro) 55%, var(--verde) 100%);
+    color: #fff; padding: 18px 26px; border-radius: 8px 8px 0 0; }
+  .titulo { font-size: 1.7rem; font-weight: 700; line-height: 1.15; }
+  .subtitulo { font-size: .95rem; color: #DDEFD9; margin-top: 2px; }
+  .logo { display: flex; flex-direction: column; align-items: flex-end; line-height: 1; }
+  .logo .sigla { color: var(--limao); font-size: 2.1rem; font-weight: 800; letter-spacing: 1px; }
+  .logo .nome { font-size: .62rem; font-weight: 700; letter-spacing: 1px; margin-top: 3px; }
+  .faixa { height: 6px; background: var(--limao); border-radius: 0 0 8px 8px; margin-bottom: 12px; }
+
+  .legenda { color: var(--suave); font-size: .85rem; margin: 4px 0 12px; }
+  .aviso { background: #FFF6E0; border: 1px solid #F0D58A; border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; }
+  .info { background: #E8F3EC; border: 1px solid #BFDCC8; border-radius: 6px; padding: 12px 14px; margin: 10px 0; }
+  details.erros { margin-bottom: 12px; } details.erros pre { white-space: pre-wrap; font-size: 12px; }
+
+  .filtros { display: grid; grid-template-columns: 220px 1fr; gap: 16px; margin-bottom: 14px; }
+  .filtros label { display: block; font-weight: 600; font-size: .85rem; margin-bottom: 4px; }
+  select { width: 100%; padding: 7px 8px; border: 1px solid var(--borda); border-radius: 6px;
+    background: #fff; font: inherit; color: var(--texto); }
+  .multi { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; background: #fff;
+    border: 1px solid var(--borda); border-radius: 6px; padding: 4px 6px; min-height: 36px; }
+  .multi select { border: 0; width: auto; flex: 1; min-width: 200px; padding: 4px; }
+  .chip { background: var(--verde); color: #fff; border-radius: 4px; padding: 3px 4px 3px 9px; font-size: .85rem; }
+  .chip button { background: none; border: 0; color: #fff; cursor: pointer; font-size: 14px; padding: 0 4px; }
+
+  .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 12px; }
+  .card { background: #fff; border: 1px solid var(--borda); border-left: 6px solid var(--verde);
+    border-radius: 6px; padding: 10px 16px; }
+  .card .rotulo { color: var(--verde-escuro); font-weight: 700; font-size: .9rem; }
+  .card .valor { font-size: 2rem; font-weight: 600; margin-top: 2px; }
+  .ultimo { margin: 6px 0 4px; }
+
+  .secao { display: inline-block; background: var(--verde); color: #fff; font-weight: 700;
+    padding: 5px 14px; border-radius: 4px; margin: 14px 0 8px; font-size: 1rem; border-left: 6px solid var(--limao); }
+  .graficos { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  .grafico { background: #fff; border: 1px solid var(--borda); border-radius: 6px; padding: 10px; }
+  .grafico svg { width: 100%; height: 300px; display: block; }
+  .grafico text { font: 12px "Segoe UI", sans-serif; fill: var(--texto); }
+  .grafico .eixo { fill: var(--suave); }
+  .grafico .grade { stroke: #EEF1EE; }
+  .chave { display: flex; gap: 18px; justify-content: center; font-size: .85rem; margin-bottom: 4px; }
+  .chave span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 2px;
+    margin-right: 6px; vertical-align: -1px; background: var(--c); }
+
+  .tabela { background: #fff; border: 1px solid var(--borda); border-radius: 6px; max-height: 420px; overflow: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th { position: sticky; top: 0; background: #F0F4F1; text-align: left; font-weight: 600;
+    padding: 8px 10px; border-bottom: 1px solid var(--borda); }
+  td { padding: 7px 10px; border-bottom: 1px solid #EEF1EE; }
+  td.num, th.num { text-align: right; }
+  #historico tbody tr { cursor: pointer; }
+  #historico tbody tr:hover { background: #F3F8F4; }
+  #historico tbody tr.selecionada { background: #E3F1E7; box-shadow: inset 4px 0 0 var(--verde); }
+  .reprovado { color: var(--reprovado); font-weight: 600; }
+  .aprovado { color: var(--verde-escuro); font-weight: 600; }
+  .dica { color: var(--suave); font-size: .85rem; margin-top: 6px; }
+
+  .detalhe-topo { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 16px 0 8px; }
+  button.principal { background: var(--verde); color: #fff; border: 0; border-radius: 6px; padding: 9px 18px;
+    font: 600 14px "Segoe UI", sans-serif; cursor: pointer; }
+  button.principal:hover { background: var(--verde-escuro); }
+  button.principal:disabled { background: #A9B5AD; cursor: default; }
+
+  .rodape { margin-top: 28px; padding: 10px 0 4px; border-top: 1px solid var(--borda);
+    display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; color: var(--suave); font-size: .8rem; }
+  .rodape b { color: var(--verde-escuro); }
+
+  #toast { position: fixed; right: 22px; bottom: 22px; background: var(--verde-escuro); color: #fff;
+    border-left: 6px solid var(--limao); border-radius: 6px; padding: 12px 18px; box-shadow: 0 6px 20px rgba(0,0,0,.2);
+    max-width: 440px; opacity: 0; transform: translateY(10px); transition: .25s; pointer-events: none; }
+  #toast.visivel { opacity: 1; transform: none; }
+
+  @media (max-width: 900px) {
+    .cards { grid-template-columns: repeat(2, 1fr); }
+    .graficos, .filtros { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="conteudo">
+  <div class="cabecalho">
+    <div>
+      <div class="titulo">Controle de Checklists de Segurança</div>
+      <div class="subtitulo">Guincho Tracionador 1172 · validação de equipamento antes da operação</div>
+    </div>
+    <div class="logo"><span class="sigla">GBMX</span><span class="nome">GREENBRIER MAXION</span></div>
+  </div>
+  <div class="faixa"></div>
+
+  <div class="legenda" id="legenda">Carregando…</div>
+  <div class="aviso" id="offline" hidden></div>
+  <div id="avisos"></div>
+
+  <div id="painel" hidden>
+    <div class="filtros">
+      <div>
+        <label for="periodo">Período</label>
+        <select id="periodo">
+          <option value="tudo">Tudo</option>
+          <option value="hoje">Hoje</option>
+          <option value="7">Últimos 7 dias</option>
+          <option value="30">Últimos 30 dias</option>
+        </select>
+      </div>
+      <div>
+        <label for="operador">Operador</label>
+        <div class="multi" id="chips"><select id="operador"></select></div>
+      </div>
+    </div>
+
+    <div class="cards">
+      <div class="card"><div class="rotulo">Checklists</div><div class="valor" id="k-total">–</div></div>
+      <div class="card"><div class="rotulo">✅ Aprovados</div><div class="valor" id="k-aprovados">–</div></div>
+      <div class="card"><div class="rotulo">❌ Reprovados</div><div class="valor" id="k-reprovados">–</div></div>
+      <div class="card"><div class="rotulo">Taxa de aprovação</div><div class="valor" id="k-taxa">–</div></div>
+    </div>
+
+    <div id="com-dados">
+      <div class="ultimo" id="ultimo"></div>
+      <div class="graficos">
+        <div>
+          <div class="secao">Checklists por dia</div>
+          <div class="grafico">
+            <div class="chave"><span style="--c: var(--verde)">✅ APROVADO</span><span style="--c: var(--reprovado)">❌ REPROVADO</span></div>
+            <svg id="g-dias" role="img" aria-label="Checklists por dia"></svg>
+          </div>
+        </div>
+        <div>
+          <div class="secao">Itens marcados como NÃO OK</div>
+          <div class="grafico"><svg id="g-itens" role="img" aria-label="Itens marcados como NÃO OK"></svg></div>
+        </div>
+      </div>
+
+      <div class="secao">Histórico</div>
+      <div class="tabela">
+        <table id="historico">
+          <thead><tr><th>Data/Hora</th><th>Operador</th><th>Matrícula</th><th>Status</th>
+            <th class="num">Itens NÃO OK</th><th>Arquivo PDF</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="detalhe"><div class="dica">Clique numa linha da tabela para ver as respostas daquele checklist.</div></div>
+    </div>
+    <div class="info" id="sem-dados" hidden>Nenhum checklist no período/filtro selecionado.</div>
+  </div>
+
+  <div class="rodape">
+    <span id="conexao">⏳ Conectando ao GitHub…</span>
+    <span><b>Desenvolvido por Engenharia de Automação</b> · GBMX</span>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+const VERDE = "#008B39", REPROVADO = "#D03B3B";
+const STATUS = { APROVADO: "✅ APROVADO", REPROVADO: "❌ REPROVADO" };
+const SVGNS = "http://www.w3.org/2000/svg";
+const el = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const statusHtml = s => `<span class="${s === "APROVADO" ? "aprovado" : "reprovado"}">${STATUS[s] || esc(s)}</span>`;
+
+let pronto = false, pendente = false, ultimoEstado = {}, intervalo = 30, operadores = [], selecionado = null, idsConhecidos = null, toastTimer;
+
+function filtros() { return { periodo: el("periodo").value, operadores }; }
+
+function toast(msg) {
+  const t = el("toast");
+  t.textContent = msg; t.classList.add("visivel");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("visivel"), 6000);
+}
+
+function mostrarEstado(e) {
+  ultimoEstado = e;
+  const hora = e.verificado_em || "–";
+  el("legenda").textContent = `Atualização automática a cada ${intervalo} s · última verificação às ${hora}`;
+  const c = el("conexao");
+  if (e.online === null) c.textContent = "⏳ Conectando ao GitHub…";
+  else if (e.online) c.textContent = `🟢 Online · sincronizado com o GitHub${e.commit ? " (commit " + e.commit + ")" : ""}`;
+  else c.textContent = `⚠️ Offline — exibindo os últimos dados baixados${e.erro ? " · " + e.erro : ""}`;
+  el("offline").hidden = e.online !== false;
+  el("offline").textContent = `⚠️ ${e.erro || "Sem conexão com o GitHub."} Exibindo os últimos dados baixados.`;
+}
+
+function el_svg(tag, attrs, pai, texto) {
+  const n = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (texto !== undefined) n.textContent = texto;
+  if (pai) pai.appendChild(n);
+  return n;
+}
+
+function passoEixo(max) {
+  const bruto = Math.max(1, max) / 5;
+  const p = Math.pow(10, Math.floor(Math.log10(bruto)));
+  return Math.max(1, [1, 2, 5, 10].map(m => m * p).find(v => v >= bruto));
+}
+
+function graficoDias(dados) {
+  const svg = el("g-dias"); svg.innerHTML = "";
+  const W = svg.clientWidth || 600, H = 300, m = { t: 10, r: 10, b: 28, l: 36 };
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const maximo = Math.max(1, ...dados.map(d => d.aprovado + d.reprovado));
+  const passo = passoEixo(maximo), topo = Math.ceil(maximo / passo) * passo;
+  const y = v => H - m.b - (v / topo) * (H - m.t - m.b);
+  for (let v = 0; v <= topo; v += passo) {
+    el_svg("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: "grade" }, svg);
+    el_svg("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end", class: "eixo" }, svg, v);
+  }
+  const larguraFaixa = (W - m.l - m.r) / Math.max(1, dados.length);
+  const larg = Math.min(48, larguraFaixa * 0.7);
+  const cadaRotulo = Math.ceil(dados.length / Math.max(1, Math.floor((W - m.l - m.r) / 46)));
+  dados.forEach((d, i) => {
+    const x = m.l + i * larguraFaixa + (larguraFaixa - larg) / 2;
+    const [a, mm, dd] = d.dia.split("-");
+    const g = el_svg("g", {}, svg);
+    el_svg("title", {}, g, `${dd}/${mm}/${a}\n✅ Aprovados: ${d.aprovado}\n❌ Reprovados: ${d.reprovado}`);
+    const total = d.aprovado + d.reprovado;
+    const hTotal = y(0) - y(total), hApr = y(0) - y(d.aprovado);
+    if (d.aprovado) el_svg("rect", { x, y: y(d.aprovado), width: larg, height: hApr, fill: VERDE }, g);
+    if (d.reprovado) el_svg("rect", { x, y: y(total), width: larg, height: hTotal - hApr - (d.aprovado ? 1 : 0), fill: REPROVADO }, g);
+    if (i % cadaRotulo === 0)
+      el_svg("text", { x: x + larg / 2, y: H - m.b + 16, "text-anchor": "middle", class: "eixo" }, svg, `${dd}/${mm}`);
+  });
+}
+
+function graficoItens(itens) {
+  const svg = el("g-itens"); svg.innerHTML = "";
+  const W = svg.clientWidth || 600, H = 300, m = { t: 4, r: 34, b: 4, l: 200 };
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const maximo = Math.max(1, ...itens.map(i => i.quantidade));
+  const faixa = (H - m.t - m.b) / itens.length;
+  itens.forEach((it, i) => {
+    const yc = m.t + i * faixa + faixa / 2;
+    const larg = (it.quantidade / maximo) * (W - m.l - m.r);
+    const g = el_svg("g", {}, svg);
+    el_svg("title", {}, g, `${it.rotulo}: ${it.quantidade} vez(es) NÃO OK`);
+    el_svg("text", { x: m.l - 8, y: yc + 4, "text-anchor": "end" }, g, it.rotulo);
+    if (larg > 0) el_svg("rect", { x: m.l, y: yc - 7, width: larg, height: 14, rx: 3, fill: REPROVADO }, g);
+    el_svg("text", { x: m.l + larg + 5, y: yc + 4, class: "eixo" }, g, it.quantidade);
+  });
+}
+
+function preencherOperadores(todos) {
+  operadores = operadores.filter(o => todos.includes(o));
+  const sel = el("operador");
+  const livres = todos.filter(o => !operadores.includes(o));
+  sel.innerHTML = `<option value="">${operadores.length ? "Adicionar operador…" : "Todos os operadores"}</option>` +
+    livres.map(o => `<option>${esc(o)}</option>`).join("");
+  document.querySelectorAll("#chips .chip").forEach(c => c.remove());
+  operadores.forEach(o => {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.innerHTML = `${esc(o)}<button title="Remover">×</button>`;
+    chip.querySelector("button").onclick = () => { operadores = operadores.filter(x => x !== o); atualizar(); };
+    el("chips").insertBefore(chip, sel);
+  });
+}
+
+async function atualizar() {
+  const f = filtros();
+  const [r, lista] = await Promise.all([pywebview.api.obter_resumo(f), pywebview.api.listar_checklists(f)]);
+  mostrarEstado(r.estado);
+  preencherOperadores(r.operadores);
+
+  const avisos = [];
+  if (r.erros.length)
+    avisos.push(`<details class="erros"><summary>⚠️ ${r.erros.length} arquivo(s) não puderam ser lidos</summary><pre>${esc(r.erros.join("\n"))}</pre></details>`);
+  el("avisos").innerHTML = avisos.join("");
+
+  const vazio = r.operadores.length === 0;
+  el("painel").hidden = vazio;
+  if (vazio) {
+    el("avisos").innerHTML += `<div class="info">Nenhum checklist recebido ainda. ${r.estado.online === false
+      ? "Sem conexão com o GitHub — os dados aparecem assim que a conexão voltar."
+      : "Aguardando a sincronização com o GitHub…"}</div>`;
+    return;
+  }
+
+  el("k-total").textContent = r.total;
+  el("k-aprovados").textContent = r.aprovados;
+  el("k-reprovados").textContent = r.reprovados;
+  el("k-taxa").textContent = r.total ? Math.round(100 * r.aprovados / r.total) + "%" : "—";
+  el("com-dados").hidden = r.total === 0;
+  el("sem-dados").hidden = r.total !== 0;
+  if (!r.total) return;
+
+  const u = r.ultimo;
+  el("ultimo").innerHTML = `<b>Último checklist:</b> ${statusHtml(u.status)} — ${esc(u.operador)} (matrícula ${esc(u.matricula)}) em ${esc(u.data_hora_fmt)}`;
+  graficoDias(r.por_dia);
+  graficoItens(r.itens_nao_ok);
+
+  el("historico").querySelector("tbody").innerHTML = lista.map(c => `
+    <tr data-id="${esc(c.id)}" class="${c.id === selecionado ? "selecionada" : ""}">
+      <td>${esc(c.data_hora_fmt)}</td><td>${esc(c.operador)}</td><td>${esc(c.matricula)}</td>
+      <td>${statusHtml(c.status)}</td><td class="num">${c.itens_nao_ok}</td><td>${esc(c.pdf)}</td></tr>`).join("");
+  if (selecionado && !lista.some(c => c.id === selecionado)) selecionado = null;
+  await mostrarDetalhe();
+}
+
+async function mostrarDetalhe() {
+  const caixa = el("detalhe");
+  const info = selecionado && await pywebview.api.detalhe(selecionado);
+  if (!info) {
+    caixa.innerHTML = `<div class="dica">Clique numa linha da tabela para ver as respostas daquele checklist.</div>`;
+    return;
+  }
+  const c = info.checklist;
+  caixa.innerHTML = `
+    <div class="detalhe-topo">
+      <b>Respostas de ${esc(c.operador)} em ${esc(c.data_hora_fmt)} — ${statusHtml(c.status)}</b>
+      <button class="principal" id="salvar" ${c.tem_pdf ? "" : "disabled title='PDF não encontrado no repositório'"}>⬇️ Salvar PDF</button>
+    </div>
+    <div class="tabela"><table>
+      <thead><tr><th class="num">Nº</th><th>Pergunta</th><th>Resposta</th></tr></thead>
+      <tbody>${info.respostas.map(r => `<tr><td class="num">${r.item}</td><td>${esc(r.pergunta)}</td>
+        <td>${r.resposta === "OK" ? '<span class="aprovado">✅ OK</span>' : '<span class="reprovado">❌ NÃO OK</span>'}</td></tr>`).join("")}</tbody>
+    </table></div>`;
+  el("salvar").onclick = async () => {
+    const res = await pywebview.api.salvar_pdf(c.id);
+    if (res.mensagem) toast(res.ok ? "✅ " + res.mensagem : "❌ " + res.mensagem);
+  };
+}
+
+el("historico").addEventListener("click", ev => {
+  const tr = ev.target.closest("tr[data-id]");
+  if (!tr) return;
+  selecionado = tr.dataset.id;
+  document.querySelectorAll("#historico tr.selecionada").forEach(t => t.classList.remove("selecionada"));
+  tr.classList.add("selecionada");
+  mostrarDetalhe().then(() => el("detalhe").scrollIntoView({ behavior: "smooth", block: "nearest" }));
+});
+el("periodo").onchange = atualizar;
+el("operador").onchange = ev => { if (ev.target.value) { operadores.push(ev.target.value); atualizar(); } };
+let redimensionar;
+window.addEventListener("resize", () => { clearTimeout(redimensionar); redimensionar = setTimeout(atualizar, 200); });
+
+async function registrarIds() {
+  const todos = await pywebview.api.listar_checklists({ periodo: "tudo" });
+  const novos = idsConhecidos ? todos.filter(c => !idsConhecidos.has(c.id)) : [];
+  idsConhecidos = new Set(todos.map(c => c.id));
+  return novos;
+}
+
+window.gbmx = {
+  async sincronizado(mudou, estado) {
+    mostrarEstado(estado);
+    if (!mudou) return;
+    if (!pronto) { pendente = true; return; }
+    const novos = await registrarIds();
+    await atualizar();
+    if (novos.length === 1) toast(`Novo checklist recebido: ${novos[0].operador} — ${STATUS[novos[0].status] || novos[0].status}`);
+    else if (novos.length > 1) toast(`${novos.length} novos checklists recebidos`);
+  },
+};
+
+window.addEventListener("pywebviewready", async () => {
+  const ini = await pywebview.api.iniciar();
+  intervalo = ini.intervalo;
+  mostrarEstado(ini.estado);
+  await registrarIds();
+  await atualizar();
+  pronto = true;
+  if (pendente) gbmx.sincronizado(true, ultimoEstado);
+});
+</script>
+</body>
+</html>
