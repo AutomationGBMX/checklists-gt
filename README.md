@@ -7,7 +7,7 @@
 | raiz (`sistema_gt_rfid_V33.py`, `*.sh`) | Raspberry Pi |
 | `nucleo/` | Lógica compartilhada |
 | `dashboard/` | Painel web |
-| `programa_gbmx/` | Aplicativo Windows |
+| `programa_gbmx/` | GUI Windows |
 | `ferramentas/` | Scripts auxiliares |
 
 ## Instalar em outra máquina (Windows)

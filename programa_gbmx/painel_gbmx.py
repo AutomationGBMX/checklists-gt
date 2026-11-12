@@ -1,4 +1,4 @@
-"""Painel de Checklists GBMX - aplicativo Windows."""
+"""Painel de Checklists GBMX - GUI Windows."""
 import html
 import os
 import shutil
