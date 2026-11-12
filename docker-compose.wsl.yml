@@ -1,0 +1,7 @@
+services:
+  painel:
+    network_mode: host
+    ports: !reset []
+    environment:
+      PAINEL_ENDERECO: 127.0.0.1
+      PAINEL_PORTA: ${PORTA:-8501}

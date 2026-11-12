@@ -1,11 +1,11 @@
-# Gerados em tempo de execução: não devem ir para o repositório
 __pycache__/
 *.pyc
 *.log
 *.bak
 *.tmp
 configuracoes.json
-
-# Ambiente local do dashboard
 .venv/
-.streamlit/secrets.toml
+.env
+programa_gbmx/build/
+programa_gbmx/dist/
+PainelGBMX.exe

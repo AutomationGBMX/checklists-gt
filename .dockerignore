@@ -1,0 +1,5 @@
+*
+!nucleo/
+!dashboard/
+**/__pycache__
+**/*.pyc

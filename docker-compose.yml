@@ -1,0 +1,17 @@
+services:
+  painel:
+    build: .
+    image: painel-checklists-gbmx:latest
+    container_name: painel-checklists-gbmx
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      CHECKLISTS_REPO: /dados/checklists-gt
+      TZ: ${TZ:-America/Sao_Paulo}
+    ports:
+      - "${ENDERECO:-127.0.0.1}:${PORTA:-8501}:8501"
+    volumes:
+      - dados:/dados
+
+volumes:
+  dados:
