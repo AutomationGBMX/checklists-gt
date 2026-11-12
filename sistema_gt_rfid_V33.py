@@ -1351,6 +1351,12 @@ class SistemaGT(QtWidgets.QMainWindow):
 
             caminho_relativo = os.path.relpath(pdf_path, repositorio)
 
+            # O JSON gêmeo do PDF (dados para o dashboard) vai no mesmo commit.
+            arquivos_relativos = [caminho_relativo]
+            json_path = os.path.splitext(pdf_path)[0] + ".json"
+            if os.path.isfile(json_path):
+                arquivos_relativos.append(os.path.relpath(json_path, repositorio))
+
             ignorado = self._executar_git(
                 repositorio, ["check-ignore", "-q", "--", caminho_relativo], timeout=5
             )
@@ -1408,19 +1414,19 @@ class SistemaGT(QtWidgets.QMainWindow):
                 return False, "Branch local/remota divergente ou com commits pendentes; sincronize manualmente. PDF ficou local."
 
             adicionar = self._executar_git(
-                repositorio, ["add", "--", caminho_relativo], timeout=10
+                repositorio, ["add", "--", *arquivos_relativos], timeout=10
             )
             if adicionar.returncode != 0:
                 return False, "Git não conseguiu adicionar o PDF; arquivo preservado localmente."
 
             diferenca = self._executar_git(
-                repositorio, ["diff", "--cached", "--quiet", "--", caminho_relativo], timeout=5
+                repositorio, ["diff", "--cached", "--quiet", "--", *arquivos_relativos], timeout=5
             )
             if diferenca.returncode == 1:
                 nome_pdf = os.path.basename(pdf_path)
                 commit = self._executar_git(
                     repositorio,
-                    ["commit", "-m", f"Novo checklist - {nome_pdf}", "--", caminho_relativo],
+                    ["commit", "-m", f"Novo checklist - {nome_pdf}", "--", *arquivos_relativos],
                     timeout=15
                 )
                 if commit.returncode != 0:
@@ -1900,11 +1906,13 @@ class SistemaGT(QtWidgets.QMainWindow):
         respostas_lista = [self.respostas_checklist[i] for i in range(total_perguntas)]
         reprovado = "NÃO OK" in respostas_lista
 
+        agora = datetime.now()
         dados_checklist = {
             'operador': self.operador_atual['nome'],
             'matricula': self.operador_atual['matricula'],
             'equipamento': "1172",
-            'data': datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+            'data': agora.strftime("%d/%m/%Y %H:%M:%S"),
+            'data_hora_iso': agora.isoformat(timespec='seconds'),  # usado no JSON do dashboard
             'respostas': respostas_lista,
             'obs': "Sem observações.",
             'status': "REPROVADO" if reprovado else "APROVADO"
@@ -1941,11 +1949,42 @@ class SistemaGT(QtWidgets.QMainWindow):
             self.invalidar_checklists_do_turno()
             self.mudar_tela(self.tela_reprovado_bloqueado, "SISTEMA_BLOQUEADO")
 
+    def salvar_json_checklist(self, dados, pdf_path):
+        """Grava ao lado do PDF (mesmo nome, extensão .json) os dados estruturados
+        do checklist, para leitura pelo dashboard."""
+        caminho = os.path.splitext(pdf_path)[0] + ".json"
+        registro = {
+            "versao_formato": 1,
+            "id": os.path.splitext(os.path.basename(pdf_path))[0],
+            "origem": "raspberry",
+            "equipamento": str(dados['equipamento']),
+            "operador": dados['operador'],
+            "matricula": str(dados['matricula']),
+            "data_hora": dados['data_hora_iso'],
+            "status": dados['status'],
+            "observacoes": dados['obs'],
+            "respostas": [
+                {"item": i, "pergunta": pergunta, "resposta": resposta}
+                for i, (pergunta, resposta) in enumerate(zip(self.perguntas, dados['respostas']), 1)
+            ],
+        }
+        caminho_tmp = caminho + ".tmp"
+        with open(caminho_tmp, "w", encoding="utf-8") as f:
+            json.dump(registro, f, ensure_ascii=False, indent=2)
+        os.replace(caminho_tmp, caminho)  # troca atômica: nunca existe JSON pela metade
+        return caminho
+
     def _gerar_pdf_em_background(self, dados_checklist):
         try:
             pdf_path = self.gerar_pdf_checklist(dados_checklist)
             if pdf_path:
                 print(f"[CHECKLIST] PDF gerado com sucesso: {pdf_path}")
+                try:
+                    json_path = self.salvar_json_checklist(dados_checklist, pdf_path)
+                    print(f"[CHECKLIST] JSON gerado com sucesso: {json_path}")
+                except Exception as erro_json:
+                    # Falha no JSON não pode impedir o envio do PDF.
+                    print(f"[CHECKLIST] Erro ao gerar JSON (PDF segue normalmente): {erro_json}")
                 sucesso, mensagem = self.publicar_pdf_no_github(pdf_path)
                 self.sinal_pdf_publicado.emit(sucesso, mensagem)
             else:

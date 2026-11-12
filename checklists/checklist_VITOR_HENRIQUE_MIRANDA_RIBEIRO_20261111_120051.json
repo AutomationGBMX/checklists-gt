@@ -1,0 +1,68 @@
+{
+  "versao_formato": 1,
+  "id": "checklist_VITOR_HENRIQUE_MIRANDA_RIBEIRO_20261111_120051",
+  "origem": "importado_pdf",
+  "equipamento": "1172",
+  "operador": "VITOR HENRIQUE MIRANDA RIBEIRO",
+  "matricula": "460237",
+  "data_hora": "2026-11-11T12:00:51",
+  "status": "APROVADO",
+  "observacoes": "",
+  "respostas": [
+    {
+      "item": 1,
+      "pergunta": "O leitor de crachá encontra-se em pleno funcionamento?",
+      "resposta": "OK"
+    },
+    {
+      "item": 2,
+      "pergunta": "Os botões de acionamento, emergência e os controles do painel encontram-se em perfeito funcionamento?",
+      "resposta": "OK"
+    },
+    {
+      "item": 3,
+      "pergunta": "A sirene e random do equipamento encontra-se em pleno funcionamento?",
+      "resposta": "OK"
+    },
+    {
+      "item": 4,
+      "pergunta": "O equipamento encontra-se em condições seguras de uso, sem apresentar danos, ruído anormal, trincas, modificações não autorizadas, peças faltantes ou instaladas de forma inadequada?",
+      "resposta": "OK"
+    },
+    {
+      "item": 5,
+      "pergunta": "A fixação do equipamento ao solo está adequada, sem a presença de parafusos soltos?",
+      "resposta": "OK"
+    },
+    {
+      "item": 6,
+      "pergunta": "A corda para tracionamento do equipamento encontra-se em boas condições de uso?",
+      "resposta": "OK"
+    },
+    {
+      "item": 7,
+      "pergunta": "A corrente e os acessórios de amarração da carga encontram-se em boas condições de uso?",
+      "resposta": "OK"
+    },
+    {
+      "item": 8,
+      "pergunta": "A carga a ser tracionada está dentro dos limites operacionais do equipamento?",
+      "resposta": "OK"
+    },
+    {
+      "item": 9,
+      "pergunta": "Existe demarcação no solo que assegure o posicionamento seguro do operador?",
+      "resposta": "OK"
+    },
+    {
+      "item": 10,
+      "pergunta": "Você possui o treinamento obrigatório para a operação do guincho tracionador?",
+      "resposta": "OK"
+    },
+    {
+      "item": 11,
+      "pergunta": "Após a verificação dos itens acima, a operação do guincho tracionador pode ser realizada com segurança?",
+      "resposta": "OK"
+    }
+  ]
+}
