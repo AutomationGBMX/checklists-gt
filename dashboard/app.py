@@ -1,15 +1,6 @@
-"""
-Dashboard dos checklists do Guincho Tracionador (GT).
-
-Rodar:  python -m streamlit run dashboard/app.py
-        (ou dar dois cliques em dashboard/iniciar_dashboard.bat)
-
-Fluxo a cada INTERVALO segundos:
-  1. verifica o GitHub (git fetch) e, se houver commit novo do Pi, faz git pull
-  2. se os arquivos JSON mudaram, relê os dados
-  3. redesenha os indicadores, gráficos e tabela
-"""
+"""Dashboard dos checklists do Guincho Tracionador (GT)."""
 import os
+import sys
 from dataclasses import asdict
 from datetime import date, timedelta
 from pathlib import Path
@@ -19,31 +10,32 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from dados import ROTULOS_ITENS, assinatura_pasta, carregar_checklists
-from repositorio import verificar_e_atualizar
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# --- Configuração (pode ser sobrescrita por variáveis de ambiente) ----------
-# Por padrão usa a cópia dedicada "checklists-gt-dados" (ao lado da pasta do
-# projeto), onde ninguém edita arquivos — assim o git pull nunca é bloqueado.
+from nucleo.dados import ROTULOS_ITENS, assinatura_pasta, carregar_checklists  # noqa: E402
+from nucleo.repositorio import verificar_e_atualizar  # noqa: E402
+from tema_gbmx import (COR_APROVADO, COR_REPROVADO, aplicar_tema, arquivo_logo,  # noqa: E402
+                       cabecalho, rodape, secao)
+
 _COPIA_DEDICADA = Path(__file__).resolve().parent.parent.parent / "checklists-gt-dados"
 REPO = Path(os.environ.get("CHECKLISTS_REPO", _COPIA_DEDICADA))
 PASTA_CHECKLISTS = REPO / "checklists"
 INTERVALO = int(os.environ.get("INTERVALO_SEGUNDOS", "30"))
 
-# Cores de STATUS (não de série): sempre acompanhadas de ícone + texto.
-COR_STATUS = {"APROVADO": "#0ca30c", "REPROVADO": "#d03b3b"}
+COR_STATUS = {"APROVADO": COR_APROVADO, "REPROVADO": COR_REPROVADO}
 ICONE_STATUS = {"APROVADO": "✅ APROVADO", "REPROVADO": "❌ REPROVADO"}
 
-st.set_page_config(page_title="Checklists GT", page_icon="✅", layout="wide")
+_logo = arquivo_logo()
+st.set_page_config(
+    page_title="Checklists GBMX",
+    page_icon=str(_logo) if _logo and _logo.suffix == ".png" else "✅",
+    layout="wide",
+)
+aplicar_tema()
 
 
-# --- Camada de cache ---------------------------------------------------------
-# ttl = "validade". Se várias abas do navegador estiverem abertas, o git fetch
-# roda no máximo uma vez a cada INTERVALO/2 segundos, e não uma vez por aba.
 @st.cache_data(ttl=max(5, INTERVALO // 2), show_spinner=False)
 def _verificar_repositorio_cache(repo: str) -> dict:
-    # Devolve um dict simples: o cache precisa serializar (pickle) o resultado, e
-    # uma classe própria quebra quando o Streamlit recarrega o módulo após uma edição.
     return asdict(verificar_e_atualizar(Path(repo)))
 
 
@@ -51,8 +43,6 @@ def verificar_repositorio(repo: str):
     return SimpleNamespace(**_verificar_repositorio_cache(repo))
 
 
-# A "assinatura" (nomes + datas dos arquivos) entra na chave do cache:
-# enquanto ela não muda, os JSONs não são relidos do disco.
 @st.cache_data(show_spinner=False)
 def ler_dados(pasta: str, assinatura: tuple):
     return carregar_checklists(Path(pasta))
@@ -70,7 +60,6 @@ def filtrar_periodo(df: pd.DataFrame, periodo: str) -> pd.DataFrame:
     return df[df["data_hora"].dt.date >= inicio]
 
 
-# --- Gráficos ----------------------------------------------------------------
 def grafico_por_dia(df: pd.DataFrame) -> alt.Chart:
     por_dia = (df.assign(dia=df["data_hora"].dt.normalize())
                  .groupby(["dia", "status"]).size().reset_index(name="quantidade"))
@@ -98,7 +87,7 @@ def grafico_por_dia(df: pd.DataFrame) -> alt.Chart:
 def grafico_itens_nao_ok(respostas: pd.DataFrame) -> alt.Chart:
     contagem = (respostas[respostas["resposta"] != "OK"]
                 .groupby("item").size()
-                .reindex(list(ROTULOS_ITENS), fill_value=0)  # mostra também os itens com zero
+                .reindex(list(ROTULOS_ITENS), fill_value=0)
                 .reset_index(name="quantidade"))
     contagem["rotulo"] = contagem["item"].map(ROTULOS_ITENS)
 
@@ -112,12 +101,10 @@ def grafico_itens_nao_ok(respostas: pd.DataFrame) -> alt.Chart:
     return (barras + rotulos).properties(height=280)
 
 
-# --- Painel (redesenhado automaticamente a cada INTERVALO segundos) ---------
 @st.fragment(run_every=INTERVALO)
 def painel():
     estado = verificar_repositorio(str(REPO))
 
-    # Aviso quando um commit novo chega enquanto a página está aberta.
     anterior = st.session_state.get("ultimo_commit")
     if anterior and anterior != estado.commit:
         st.toast(f"Novo commit recebido: {estado.mensagem}", icon="🔄")
@@ -125,10 +112,7 @@ def painel():
 
     if estado.erro:
         st.warning(f"Não foi possível consultar o GitHub — exibindo os últimos dados conhecidos.\n\n{estado.erro}")
-    st.caption(
-        f"Repositório no commit `{estado.commit}` — “{estado.mensagem}” · "
-        f"verificado às {estado.verificado_em:%H:%M:%S} · atualização automática a cada {INTERVALO} s"
-    )
+    st.caption(f"Atualização automática a cada {INTERVALO} s · última verificação às {estado.verificado_em:%H:%M:%S}")
 
     checklists, respostas, erros = ler_dados(str(PASTA_CHECKLISTS), assinatura_pasta(PASTA_CHECKLISTS))
     if erros:
@@ -138,10 +122,9 @@ def painel():
     if checklists.empty:
         st.info("Nenhum checklist em formato JSON encontrado ainda em `checklists/`.\n\n"
                 "Eles aparecem assim que o Raspberry Pi enviar o primeiro checklist com a versão nova "
-                "do sistema (ou rode `dashboard/importar_pdfs_antigos.py` para importar o histórico).")
+                "do sistema (ou rode `ferramentas/importar_pdfs_antigos.py` para importar o histórico).")
         return
 
-    # --- Filtros (uma linha, acima de tudo que eles afetam) ---
     c1, c2 = st.columns([1, 3])
     periodo = c1.selectbox("Período", ["Tudo", "Hoje", "Últimos 7 dias", "Últimos 30 dias"], key="periodo")
     operadores = c2.multiselect("Operador", sorted(checklists["operador"].unique()), key="operadores",
@@ -152,7 +135,6 @@ def painel():
         df = df[df["operador"].isin(operadores)]
     resp = respostas[respostas["id"].isin(df["id"])]
 
-    # --- Indicadores ---
     total = len(df)
     aprovados = int((df["status"] == "APROVADO").sum())
     reprovados = total - aprovados
@@ -172,17 +154,15 @@ def painel():
         f"(matrícula {ultimo['matricula']}) em {ultimo['data_hora']:%d/%m/%Y %H:%M}"
     )
 
-    # --- Gráficos ---
     g1, g2 = st.columns(2)
     with g1:
-        st.subheader("Checklists por dia")
+        secao("Checklists por dia")
         st.altair_chart(grafico_por_dia(df), use_container_width=True)
     with g2:
-        st.subheader("Itens marcados como NÃO OK")
+        secao("Itens marcados como NÃO OK")
         st.altair_chart(grafico_itens_nao_ok(resp), use_container_width=True)
 
-    # --- Tabela + detalhe ---
-    st.subheader("Histórico")
+    secao("Histórico")
     tabela = df.assign(status=df["status"].map(ICONE_STATUS))[
         ["data_hora", "operador", "matricula", "status", "itens_nao_ok", "pdf"]
     ]
@@ -208,7 +188,7 @@ def painel():
                 data=arquivo_pdf.read_bytes(),
                 file_name=arquivo_pdf.name,
                 mime="application/pdf",
-                on_click="ignore",          # baixar não precisa redesenhar a página
+                on_click="ignore",
                 key=f"baixar_{escolhido['id']}",
                 width="stretch",
             )
@@ -225,5 +205,6 @@ def painel():
         st.caption("Clique numa linha da tabela para ver as respostas daquele checklist.")
 
 
-st.title("Checklists — Guincho Tracionador 1172")
+cabecalho("Controle de Checklists de Segurança", "Guincho Tracionador 1172 · validação de equipamento antes da operação")
 painel()
+rodape()

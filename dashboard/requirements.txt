@@ -1,4 +1,4 @@
-streamlit>=1.37
-pandas
-altair
-pypdf
+streamlit==1.50.0
+pandas==2.3.3
+altair==5.5.0
+pypdf==6.21.4
