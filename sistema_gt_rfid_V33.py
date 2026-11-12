@@ -1351,7 +1351,6 @@ class SistemaGT(QtWidgets.QMainWindow):
 
             caminho_relativo = os.path.relpath(pdf_path, repositorio)
 
-            # O JSON gêmeo do PDF (dados para o dashboard) vai no mesmo commit.
             arquivos_relativos = [caminho_relativo]
             json_path = os.path.splitext(pdf_path)[0] + ".json"
             if os.path.isfile(json_path):
@@ -1912,7 +1911,7 @@ class SistemaGT(QtWidgets.QMainWindow):
             'matricula': self.operador_atual['matricula'],
             'equipamento': "1172",
             'data': agora.strftime("%d/%m/%Y %H:%M:%S"),
-            'data_hora_iso': agora.isoformat(timespec='seconds'),  # usado no JSON do dashboard
+            'data_hora_iso': agora.isoformat(timespec='seconds'),
             'respostas': respostas_lista,
             'obs': "Sem observações.",
             'status': "REPROVADO" if reprovado else "APROVADO"
@@ -1950,8 +1949,6 @@ class SistemaGT(QtWidgets.QMainWindow):
             self.mudar_tela(self.tela_reprovado_bloqueado, "SISTEMA_BLOQUEADO")
 
     def salvar_json_checklist(self, dados, pdf_path):
-        """Grava ao lado do PDF (mesmo nome, extensão .json) os dados estruturados
-        do checklist, para leitura pelo dashboard."""
         caminho = os.path.splitext(pdf_path)[0] + ".json"
         registro = {
             "versao_formato": 1,
@@ -1971,7 +1968,7 @@ class SistemaGT(QtWidgets.QMainWindow):
         caminho_tmp = caminho + ".tmp"
         with open(caminho_tmp, "w", encoding="utf-8") as f:
             json.dump(registro, f, ensure_ascii=False, indent=2)
-        os.replace(caminho_tmp, caminho)  # troca atômica: nunca existe JSON pela metade
+        os.replace(caminho_tmp, caminho)
         return caminho
 
     def _gerar_pdf_em_background(self, dados_checklist):
@@ -1983,7 +1980,6 @@ class SistemaGT(QtWidgets.QMainWindow):
                     json_path = self.salvar_json_checklist(dados_checklist, pdf_path)
                     print(f"[CHECKLIST] JSON gerado com sucesso: {json_path}")
                 except Exception as erro_json:
-                    # Falha no JSON não pode impedir o envio do PDF.
                     print(f"[CHECKLIST] Erro ao gerar JSON (PDF segue normalmente): {erro_json}")
                 sucesso, mensagem = self.publicar_pdf_no_github(pdf_path)
                 self.sinal_pdf_publicado.emit(sucesso, mensagem)
