@@ -1,7 +1,8 @@
-"""Leitura dos checklists (JSON ou PDF)."""
+"""Leitura dos checklists (JSON ou PDF) para DataFrames."""
 import json
-from datetime import datetime
 from pathlib import Path
+
+import pandas as pd
 
 from .leitor_pdf import converter as converter_pdf
 
@@ -33,19 +34,14 @@ def _registros(pasta: Path):
             yield pdf, lambda a=pdf: converter_pdf(a)
 
 
-COLUNAS_CHECKLISTS = ["id", "data_hora", "operador", "matricula", "equipamento",
-                      "status", "itens_nao_ok", "origem", "pdf"]
-COLUNAS_RESPOSTAS = ["id", "item", "rotulo", "pergunta", "resposta"]
-
-
-def ler_registros(pasta: Path):
+def carregar_checklists(pasta: Path):
     linhas, linhas_resp, erros = [], [], []
     for arquivo, ler in _registros(pasta):
         try:
             reg = ler()
-            linha = {
+            linhas.append({
                 "id": reg["id"],
-                "data_hora": datetime.fromisoformat(reg["data_hora"]).isoformat(timespec="seconds"),
+                "data_hora": pd.to_datetime(reg["data_hora"]),
                 "operador": reg["operador"],
                 "matricula": reg.get("matricula", ""),
                 "equipamento": reg.get("equipamento", ""),
@@ -53,28 +49,20 @@ def ler_registros(pasta: Path):
                 "itens_nao_ok": sum(r["resposta"] != "OK" for r in reg["respostas"]),
                 "origem": reg.get("origem", ""),
                 "pdf": arquivo.with_suffix(".pdf").name,
-            }
-            resp = [{
-                "id": reg["id"],
-                "item": r["item"],
-                "rotulo": ROTULOS_ITENS.get(r["item"], r["pergunta"][:40]),
-                "pergunta": r["pergunta"],
-                "resposta": r["resposta"],
-            } for r in reg["respostas"]]
+            })
+            for r in reg["respostas"]:
+                linhas_resp.append({
+                    "id": reg["id"],
+                    "item": r["item"],
+                    "rotulo": ROTULOS_ITENS.get(r["item"], r["pergunta"][:40]),
+                    "pergunta": r["pergunta"],
+                    "resposta": r["resposta"],
+                })
         except Exception as e:
             erros.append(f"{arquivo.name}: {e}")
-            continue
-        linhas.append(linha)
-        linhas_resp.extend(resp)
-    linhas.sort(key=lambda l: l["data_hora"], reverse=True)
-    return linhas, linhas_resp, erros
 
-
-def carregar_checklists(pasta: Path):
-    import pandas as pd
-
-    linhas, linhas_resp, erros = ler_registros(pasta)
-    checklists = pd.DataFrame(linhas, columns=COLUNAS_CHECKLISTS)
-    checklists["data_hora"] = pd.to_datetime(checklists["data_hora"])
-    respostas = pd.DataFrame(linhas_resp, columns=COLUNAS_RESPOSTAS)
+    colunas = ["id", "data_hora", "operador", "matricula", "equipamento",
+               "status", "itens_nao_ok", "origem", "pdf"]
+    checklists = pd.DataFrame(linhas, columns=colunas).sort_values("data_hora", ascending=False)
+    respostas = pd.DataFrame(linhas_resp, columns=["id", "item", "rotulo", "pergunta", "resposta"])
     return checklists, respostas, erros
